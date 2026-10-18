@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (not yet published)
+## 0.1.0 (2026-10-19)
 
 First release. Reads ECW version 2 files in the browser and in Node, bit for bit the same as the ECW SDK through GDAL on the files tested so far.
 
