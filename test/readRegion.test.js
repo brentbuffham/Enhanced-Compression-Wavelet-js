@@ -104,8 +104,3 @@ test("an aborted signal rejects with ABORTED", async function () {
 	c.abort();
 	await assert.rejects(ecw.readRegion({ x: 0, y: 0, width: 64, height: 48, signal: c.signal }), { code: "ABORTED" });
 });
-
-test("readRegionToScratch is still NOT_IMPLEMENTED", async function () {
-	var ecw = await openEcw(file());
-	await assert.rejects(ecw.readRegionToScratch({ x: 0, y: 0, width: 1, height: 1 }), { code: "NOT_IMPLEMENTED" });
-});

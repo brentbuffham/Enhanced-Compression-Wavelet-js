@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { openEcw } from "../../src/EcwReader.js";
 import { readTiff } from "../helpers/readTiff.js";
 import { findSample } from "../helpers/samples.js";
+import { createFakeRoot } from "../helpers/fakeOpfs.js";
 
 var sample = findSample();
 var manifestPath = sample && join(sample.refDir, "manifest.json");
@@ -46,4 +47,21 @@ test("readRegion matches GDAL references exactly", { skip: skip, timeout: 120000
 		assert.ok(r.exact >= MIN_EXACT, m.name + ": exact " + (100 * r.exact).toFixed(1) + "%");
 		console.log("# " + m.name + " level " + img.level + " exact " + (100 * r.exact).toFixed(1) + "% max " + r.max);
 	}
+});
+
+test("readRegionToScratch strips equal the GDAL references", { skip: skip, timeout: 120000 }, async function () {
+	var ecw = await openEcw(await openAsBlob(sample.ecwPath));
+	var manifest = JSON.parse(readFileSync(manifestPath, "utf8")).filter(function (m) { return /^crop-/.test(m.name); });
+	for (var m of manifest) {
+		var ref = readTiff(new Uint8Array(readFileSync(join(sample.refDir, m.name))));
+		// strips of 100 rows cross block rows at every level
+		var out = await ecw.readRegionToScratch({ x: m.srcwin[0], y: m.srcwin[1], width: m.srcwin[2], height: m.srcwin[3],
+			outWidth: m.outsize[0], outHeight: m.outsize[1], scratch: { root: createFakeRoot() }, stripBytes: m.outsize[0] * 4 * 100 });
+		var reader = await out.openReader();
+		var img = { data: reader.slice(0, out.byteLength), width: out.width, height: out.height };
+		reader.close();
+		var r = compare(img, ref);
+		assert.ok(r.max === 0 && r.exact === 1, m.name + ": max error " + r.max);
+	}
+	await ecw.close();
 });

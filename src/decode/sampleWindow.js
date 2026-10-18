@@ -19,25 +19,29 @@
  * @param {number} outW
  * @param {number} outH
  * @param {"nearest"|"average"} mode
- * @returns {Float32Array[]} outW * outH per band
+ * @param {number} [oy0=0] - First output row to produce (strips).
+ * @param {number} [oy1=outH] - End output row (exclusive).
+ * @returns {Float32Array[]} outW * (oy1 - oy0) per band
  */
-export function sampleWindow(bands, winW, winH, region, scale, lx0, ly0, outW, outH, mode) {
-	if (mode === "average") return sampleAverage(bands, winW, winH, region, scale, lx0, ly0, outW, outH);
-	var out = bands.map(function () { return new Float32Array(outW * outH); });
-	for (var oy = 0; oy < outH; oy++) {
+export function sampleWindow(bands, winW, winH, region, scale, lx0, ly0, outW, outH, mode, oy0, oy1) {
+	if (oy0 === undefined) oy0 = 0;
+	if (oy1 === undefined) oy1 = outH;
+	if (mode === "average") return sampleAverage(bands, winW, winH, region, scale, lx0, ly0, outW, outH, oy0, oy1);
+	var out = bands.map(function () { return new Float32Array(outW * (oy1 - oy0)); });
+	for (var oy = oy0; oy < oy1; oy++) {
 		var sy = Math.min(winH - 1, Math.max(0, Math.floor((region.y + (oy + 0.5) * region.height / outH) / scale) - ly0));
 		for (var ox = 0; ox < outW; ox++) {
 			var sx = Math.min(winW - 1, Math.max(0, Math.floor((region.x + (ox + 0.5) * region.width / outW) / scale) - lx0));
-			for (var b = 0; b < bands.length; b++) out[b][oy * outW + ox] = bands[b][sy * winW + sx];
+			for (var b = 0; b < bands.length; b++) out[b][(oy - oy0) * outW + ox] = bands[b][sy * winW + sx];
 		}
 	}
 	return out;
 }
 
-// Per output index: the window pixels it covers and their area weights (summing to 1)
-function boxWeights(start, extent, count, scale, l0, winLen) {
+// Per output index in [o0, o1): the window pixels it covers and their area weights (summing to 1)
+function boxWeights(start, extent, count, scale, l0, winLen, o0, o1) {
 	var list = [];
-	for (var o = 0; o < count; o++) {
+	for (var o = o0; o < o1; o++) {
 		var a = (start + o * extent / count) / scale - l0;
 		var b = (start + (o + 1) * extent / count) / scale - l0;
 		var idx = [], wts = [], sum = 0;
@@ -54,9 +58,10 @@ function boxWeights(start, extent, count, scale, l0, winLen) {
 	return list;
 }
 
-function sampleAverage(bands, winW, winH, region, scale, lx0, ly0, outW, outH) {
-	var xs = boxWeights(region.x, region.width, outW, scale, lx0, winW);
-	var ys = boxWeights(region.y, region.height, outH, scale, ly0, winH);
+function sampleAverage(bands, winW, winH, region, scale, lx0, ly0, outW, outH, oy0, oy1) {
+	var rowsOut = oy1 - oy0;
+	var xs = boxWeights(region.x, region.width, outW, scale, lx0, winW, 0, outW);
+	var ys = boxWeights(region.y, region.height, outH, scale, ly0, winH, oy0, oy1);
 	return bands.map(function (src) {
 		// Step 1) Rows: window rows x output columns
 		var rows = new Float32Array(winH * outW);
@@ -68,8 +73,8 @@ function sampleAverage(bands, winW, winH, region, scale, lx0, ly0, outW, outH) {
 			}
 		}
 		// Step 2) Columns
-		var out = new Float32Array(outW * outH);
-		for (var oy = 0; oy < outH; oy++) {
+		var out = new Float32Array(outW * rowsOut);
+		for (var oy = 0; oy < rowsOut; oy++) {
 			var cy = ys[oy];
 			for (var ox2 = 0; ox2 < outW; ox2++) {
 				var s = 0;

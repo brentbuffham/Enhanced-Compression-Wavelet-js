@@ -42,3 +42,14 @@ test("a window offset in a coarser level maps through the scale", function () {
 	var out = sampleWindow([Float32Array.from([10, 20, 30, 40])], 4, 1, { x: 4, y: 0, width: 8, height: 2 }, 2, 2, 0, 2, 1, "average");
 	assert.deepEqual(Array.from(out[0]), [15, 35]);
 });
+
+test("a row range samples only those output rows, identically to the full grid", function () {
+	var values = [];
+	for (var i = 0; i < 6 * 6; i++) values.push((i * 37) % 23);
+	["nearest", "average"].forEach(function (mode) {
+		var full = sampleWindow([Float32Array.from(values)], 6, 6, region(6, 6), 1, 0, 0, 4, 4, mode)[0];
+		// rows 1..3 from a window holding only level rows 1..5
+		var part = sampleWindow([Float32Array.from(values.slice(6))], 6, 5, region(6, 6), 1, 0, 1, 4, 4, mode, 1, 3)[0];
+		assert.deepEqual(Array.from(part), Array.from(full.subarray(4, 12)), mode);
+	});
+});

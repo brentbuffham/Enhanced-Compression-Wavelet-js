@@ -33,15 +33,18 @@ function validateRings(rings) {
  * @param {number} height - Output height in pixels.
  * @param {{minX:number, minY:number, maxX:number, maxY:number}} bounds - Map extent of the output.
  * @param {Array<Array<[number, number]>>} rings
+ * @param {number} [firstRow=0] - rgba holds output rows from firstRow on (a strip of the image).
  * @returns {Uint8ClampedArray} the same array
  */
-export function clipToPolygon(rgba, width, height, bounds, rings) {
+export function clipToPolygon(rgba, width, height, bounds, rings, firstRow) {
 	validateRings(rings);
 	if (rings.length === 0) return rgba;
 	var dx = (bounds.maxX - bounds.minX) / width;
 	var dy = (bounds.maxY - bounds.minY) / height;
 	var xs = [];
-	for (var r = 0; r < height; r++) {
+	var r0 = firstRow || 0;
+	var r1 = Math.min(height, r0 + rgba.length / (4 * width));
+	for (var r = r0; r < r1; r++) {
 		// Step 1) Crossings of every edge with this row's centre line
 		var y = bounds.maxY - (r + 0.5) * dy;
 		xs.length = 0;
@@ -62,7 +65,7 @@ export function clipToPolygon(rgba, width, height, bounds, rings) {
 			var x = bounds.minX + (c + 0.5) * dx;
 			while (span < xs.length && x >= xs[span + 1]) span += 2;
 			var inside = span + 1 < xs.length && x >= xs[span];
-			if (!inside) rgba[(r * width + c) * 4 + 3] = 0;
+			if (!inside) rgba[((r - r0) * width + c) * 4 + 3] = 0;
 		}
 	}
 	return rgba;

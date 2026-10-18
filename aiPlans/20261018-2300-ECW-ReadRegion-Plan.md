@@ -44,3 +44,14 @@ Plan 1 constraints apply (zero deps, `node --test`, test-first, style, no privat
 
 ### Task 6: Demo Read tab
 - `readRegion` runs in the demo Worker; the Read tab shows the decoded image; a "Whole image" button fills the form for a viewer-sized thumbnail.
+
+### Task 7: `readRegionToScratch` (strips into OPFS)
+- Same validation, level choice and sampling as `readRegion`; output rows are decoded in strips of at most `stripBytes` (default 64 MB of RGBA) and streamed into an OPFS scratch file with `openScratchSyncWriter` (Worker or Node with an injected root: `scratch: { root, dir }`).
+- File holds raw RGBA rows, top to bottom, `width * 4` bytes each. Result `{ scratchId, width, height, level, bounds, byteLength, openReader() }`; `openReader()` → `openScratchReader(scratchId, { byteLength })`.
+- A fresh decode context per strip keeps the block cache bounded. `transparentBelow` / `clipPolygon` apply per strip with the strip's first row, so bytes equal `readRegion` exactly.
+- Abort or error removes the scratch file and rejects. `close()` removes the reader's scratch files.
+- Tests: bytes equal `readRegion` for nearest, average, clip + transparency with several strips; abort removes the file; invalid args reject before any file is created; `close()` removes files.
+
+### Task 8: Worker entry `ecw-js/worker`
+- `src/workers/ecwDecodeWorker.js`: message protocol `{ id, type: "open" | "readRegion" | "readRegionToScratch" | "close", payload }` in; `{ id, type: "progress" | "result" | "error" }` out; pixel buffers transferred. Protocol logic lives in a pure `createWorkerHandler(post)` so Node tests drive it without a Worker.
+- `package.json` exports `./worker`.

@@ -36,11 +36,10 @@ test("openEcw with a non-Blob rejects INVALID_ARGUMENT", async function () {
 	await assert.rejects(openEcw("file.ecw"), { code: "INVALID_ARGUMENT" });
 });
 
-test("readRegionToScratch rejects NOT_IMPLEMENTED; close is idempotent", async function () {
+test("close is idempotent", async function () {
 	var r = await openEcw(new Blob([buildEcwHeader({})]));
-	await assert.rejects(r.readRegionToScratch({ x: 0, y: 0, width: 1, height: 1 }), { code: "NOT_IMPLEMENTED" });
-	r.close();
-	r.close();
+	await r.close();
+	await r.close();
 });
 
 test("public exports", async function () {

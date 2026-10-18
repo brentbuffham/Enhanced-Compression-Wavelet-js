@@ -107,3 +107,11 @@ test("invalid ring throws INVALID_ARGUMENT", function () {
 	assert.throws(function () { clip([[[0, 0], [NaN, 1], [2, 2]]]); }, { code: "INVALID_ARGUMENT" });
 	assert.throws(function () { clip("not rings"); }, { code: "INVALID_ARGUMENT" });
 });
+
+test("firstRow clips a strip exactly as the same rows of the whole image", function () {
+	var rings = [[[0.3, 0.2], [7.9, 1.1], [3.2, 7.7]]];
+	var bounds = { minX: 0, minY: 0, maxX: 8, maxY: 8 };
+	var whole = clipToPolygon(new Uint8ClampedArray(8 * 8 * 4).fill(255), 8, 8, bounds, rings);
+	var strip = clipToPolygon(new Uint8ClampedArray(8 * 3 * 4).fill(255), 8, 8, bounds, rings, 4);
+	assert.deepEqual(Array.from(strip), Array.from(whole.subarray(8 * 4 * 4, 8 * 7 * 4)));
+});

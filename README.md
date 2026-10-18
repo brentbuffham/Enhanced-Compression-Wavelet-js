@@ -4,9 +4,9 @@ A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, p
 
 **Status: work in progress.** Nothing is published to npm yet and the API may change.
 
-- Working: `openEcw` reads the header, georeferencing and levels, and `readRegion` decodes imagery at any resolution.
+- Working: `openEcw` reads the header, georeferencing and levels; `readRegion` decodes imagery at any resolution; `readRegionToScratch` streams outputs too big for memory into OPFS.
 - Accuracy: matches the ECW SDK (via GDAL) bit for bit on the test data, at full resolution and at every overview level.
-- Not yet: `readRegionToScratch` (large outputs to OPFS), a Worker entry point, and writing ECW.
+- Not yet: a Worker entry point, and writing ECW.
 
 ## Demo
 
@@ -59,12 +59,24 @@ var img = await ecw.readRegion({
 	transparentBelow: 3,                     // optional: near-black becomes transparent
 	clipPolygon: [[[x1, y1], [x2, y2], [x3, y3]]] // optional: map-coordinate rings
 });
-// { data: Uint8ClampedArray (RGBA), width, height, bounds: { minX, minY, maxX, maxY } }
+// { data: Uint8ClampedArray (RGBA), width, height, level, bounds: { minX, minY, maxX, maxY } }
 
-ecw.close();
+await ecw.close(); // also deletes this reader's scratch files
 ```
 
-Big outputs go to a scratch file in the browser's Origin Private File System (OPFS) rather than memory, and decoded blocks are cached there too.
+## Outputs bigger than memory
+
+`readRegion` refuses outputs above `maxOutputBytes` (512 MB by default) with `OUTPUT_TOO_LARGE`. For those, `readRegionToScratch` takes the same options, decodes in strips and streams the RGBA rows into a scratch file in the browser's Origin Private File System (OPFS). It needs synchronous OPFS access, so call it from a Worker.
+
+```js
+var out = await ecw.readRegionToScratch({ x: 0, y: 0, width: 120000, height: 80000, outWidth: 30000, outHeight: 20000 });
+// { scratchId, width, height, level, bounds, byteLength, openReader() }
+var reader = await out.openReader();
+var firstRow = reader.slice(0, out.width * 4); // RGBA rows, top to bottom
+reader.close();
+```
+
+The bytes are exactly what `readRegion` would have returned. Scratch files are removed by `ecw.close()`; call `sweepStaleScratchFiles()` at startup to clear any left behind by a crashed tab (older than 24 hours by default).
 
 ## Errors
 
