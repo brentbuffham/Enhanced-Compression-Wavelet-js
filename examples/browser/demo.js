@@ -25,7 +25,11 @@ var hoverTimer = 0;
 var lastHoverBlock = -1;
 var blockSizes = null;
 
-var viewer = new Viewer($("viewer"), { onHover: onHover, onPolygon: onPolygon });
+var viewer = new Viewer($("viewer"), { onHover: onHover, onPolygon: onPolygon, onViewChange: refineView });
+var imageMode = false;
+var refineSeq = 0;
+var refineBusy = false;
+var refinePending = false;
 
 //----------------------------------------------------------
 // Worker jobs
@@ -208,6 +212,7 @@ async function showLevel(level, statsOnly) {
 	var bounds = levelPictureBounds(reader.info, opened.header, opened.grid[level]);
 	blockSizes = { cols: result.cols, rows: result.rows, sizes: result.sizes };
 	if (!statsOnly) {
+		imageMode = false;
 		basePicture = { rgba: rgba, width: result.cols, height: result.rows, bounds: bounds, sizes: result.sizes };
 		viewer.setPicture({ rgba: rgba.slice(), width: result.cols, height: result.rows, bounds: bounds });
 	}
@@ -308,6 +313,49 @@ function applyPostSteps() {
 }
 
 //----------------------------------------------------------
+// Zoom refinement: decode the visible area at screen resolution
+//----------------------------------------------------------
+
+async function refineView() {
+	if (!imageMode || !reader) return;
+	if (refineBusy) { refinePending = true; return; }
+	var vis = viewer.visible();
+	if (!vis) return;
+	var i = reader.info;
+	// Visible map bounds -> full-resolution pixel window, clamped to the image
+	var x0 = Math.max(0, Math.floor((vis.bounds.minX - i.originX) / i.cellSizeX));
+	var x1 = Math.min(i.width, Math.ceil((vis.bounds.maxX - i.originX) / i.cellSizeX));
+	var y0 = Math.max(0, Math.floor((vis.bounds.maxY - i.originY) / i.cellSizeY));
+	var y1 = Math.min(i.height, Math.ceil((vis.bounds.minY - i.originY) / i.cellSizeY));
+	if (x1 <= x0 || y1 <= y0) return;
+	// Screen pixels the window covers; never ask for more than full resolution
+	var screenPerPixel = vis.width / ((vis.bounds.maxX - vis.bounds.minX) / i.cellSizeX);
+	var outW = Math.min(x1 - x0, Math.ceil((x1 - x0) * screenPerPixel));
+	var outH = Math.min(y1 - y0, Math.ceil((y1 - y0) * screenPerPixel));
+	// The overview is already sharp enough: drop any detail layer
+	var basePerPixel = basePicture.width / i.width;
+	if (outW / (x1 - x0) <= basePerPixel * 1.05) { viewer.clearDetail(); return; }
+	var scale = Math.min(1, 4096 / Math.max(outW, outH));
+	outW = Math.max(1, Math.round(outW * scale));
+	outH = Math.max(1, Math.round(outH * scale));
+	var seq = ++refineSeq;
+	refineBusy = true;
+	var t0 = performance.now();
+	try {
+		var img = await run("read", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, outWidth: outW, outHeight: outH }, true);
+		if (seq === refineSeq) {
+			viewer.setDetail({ rgba: img.data, width: img.width, height: img.height, bounds: img.bounds });
+			setProgress(1, "detail " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
+		}
+	} catch (err) {
+		if (err.code !== "ABORTED") setError(err);
+	} finally {
+		refineBusy = false;
+		if (refinePending) { refinePending = false; refineView(); }
+	}
+}
+
+//----------------------------------------------------------
 // Read tab
 //----------------------------------------------------------
 
@@ -335,6 +383,7 @@ async function runRead() {
 		var img = await run("read", opts);
 		basePicture = { rgba: img.data, width: img.width, height: img.height, bounds: img.bounds };
 		viewer.setPicture({ rgba: img.data.slice(), width: img.width, height: img.height, bounds: img.bounds });
+		imageMode = true;
 		setProgress(1, "decoded " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
 		how(code, { width: img.width, height: img.height, level: img.level, bounds: img.bounds });
 	} catch (err) {

@@ -3,6 +3,8 @@
 // Canvas viewer: shows one RGBA "picture" spanning map bounds,
 // with wheel zoom, drag pan, hover reporting and a polygon tool.
 // Pixels are drawn nearest-neighbour so block maps stay crisp.
+// An optional detail layer (a sharper decode of the visible area)
+// is drawn over the picture; onViewChange fires when zoom/pan settle.
 //==========================================================
 
 import { screenToMap, mapToScreen } from "./lib/viewMath.js";
@@ -20,6 +22,7 @@ export function Viewer(canvas, callbacks) {
 	this.view = null;
 	this.polygon = [];
 	this.drawing = false;
+	this.detail = null;
 	this._bind();
 	this._resize();
 	new ResizeObserver(this._resize.bind(this)).observe(canvas);
@@ -42,6 +45,7 @@ Viewer.prototype._resize = function () {
 Viewer.prototype.setPicture = function (picture, keepView) {
 	var sameSize = this.picture && this.picture.width === picture.width && this.picture.height === picture.height;
 	this.picture = picture;
+	this.detail = null;
 	var off = document.createElement("canvas");
 	off.width = picture.width;
 	off.height = picture.height;
@@ -66,6 +70,41 @@ Viewer.prototype.fit = function () {
 	};
 };
 
+/**
+ * Draw a sharper image of part of the map over the picture.
+ * @param {{rgba: Uint8ClampedArray, width: number, height: number, bounds: object}} detail
+ */
+Viewer.prototype.setDetail = function (detail) {
+	var off = document.createElement("canvas");
+	off.width = detail.width;
+	off.height = detail.height;
+	off.getContext("2d").putImageData(new ImageData(detail.rgba, detail.width, detail.height), 0, 0);
+	this.detail = { bitmap: off, bounds: detail.bounds };
+	this.draw();
+};
+
+Viewer.prototype.clearDetail = function () {
+	this.detail = null;
+	this.draw();
+};
+
+/**
+ * Map bounds currently on screen and the canvas size in device pixels.
+ * @returns {{bounds: {minX, minY, maxX, maxY}, width: number, height: number}|null}
+ */
+Viewer.prototype.visible = function () {
+	if (!this.view) return null;
+	var a = screenToMap(this.view, 0, 0);
+	var b = screenToMap(this.view, this.canvas.width, this.canvas.height);
+	return { bounds: { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) }, width: this.canvas.width, height: this.canvas.height };
+};
+
+Viewer.prototype._viewChanged = function () {
+	var self = this;
+	clearTimeout(this._viewTimer);
+	this._viewTimer = setTimeout(function () { if (self.callbacks.onViewChange) self.callbacks.onViewChange(); }, 250);
+};
+
 Viewer.prototype.draw = function () {
 	var ctx = this.ctx;
 	ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -74,6 +113,13 @@ Viewer.prototype.draw = function () {
 	var v = this.view;
 	ctx.imageSmoothingEnabled = false;
 	ctx.drawImage(this.bitmap, v.offsetX, v.offsetY, v.width * v.scale, v.height * v.scale);
+	if (this.detail) {
+		var tl = mapToScreen(v, this.detail.bounds.minX, this.detail.bounds.maxY);
+		var br = mapToScreen(v, this.detail.bounds.maxX, this.detail.bounds.minY);
+		ctx.imageSmoothingEnabled = true;
+		ctx.drawImage(this.detail.bitmap, tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+		ctx.imageSmoothingEnabled = false;
+	}
 	this._drawPolygon();
 };
 
@@ -135,6 +181,7 @@ Viewer.prototype._bind = function () {
 		v.scale *= factor;
 		self._userMoved = true;
 		self.draw();
+		self._viewChanged();
 	}, { passive: false });
 	this.canvas.addEventListener("pointerdown", function (event) {
 		if (!self.view || self.drawing) return;
@@ -161,6 +208,7 @@ Viewer.prototype._bind = function () {
 		}
 	});
 	this.canvas.addEventListener("pointerup", function () {
+		if (drag) self._viewChanged();
 		drag = null;
 		self.canvas.classList.remove("panning");
 	});

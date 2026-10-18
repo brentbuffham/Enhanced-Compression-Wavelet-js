@@ -27,7 +27,7 @@ Each tab writes the call it made, and its result, into "How it works".
 4. Blocks tab: change the level. The block-size map replaces the image and the level stats update.
 5. Hover over the map. The HUD shows map coordinates and the block number, and the panel lists the block's streams with modes.
 6. Click "Sample stream modes". Mode counts and the empty-stream share appear, and the status bar gains an "empty streams" figure.
-7. Mouse wheel zooms around the cursor; drag pans.
+7. Mouse wheel zooms around the cursor; drag pans. About a quarter of a second after you stop, the visible area is decoded again at screen resolution and drawn sharp over the overview (the status bar shows "detail … from level …").
 8. Clip tab: click "Draw polygon", click three or more points, double-click to finish, then "Apply". Pixels outside the polygon and below the threshold turn transparent (checkerboard shows). "Reset picture" restores the map.
 9. After a drop, the decoded image appears and the status bar says which level it came from and how long it took. Read tab: set a 1024×1024 window at full resolution and run it; the viewer shows the detail.
 10. Drop a non-ECW file (for example a PNG). The status bar shows `NOT_ECW` and the next ECW drop works.
