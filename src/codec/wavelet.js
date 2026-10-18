@@ -5,9 +5,10 @@
 // an image of 2w x 2h. 1-D rule, indices clamped to [0, len):
 //   even x[2k]   = s[k] - (d[k-1] + d[k]) / 2
 //   odd  x[2k+1] = (s[k] + s[k+1]) / 2 + d[k]
-// Columns first (LL with LH; HL with HH), odd-row averages floored to
-// quarters, then rows exactly: matches the ECW SDK's general path
-// (FINDINGS.md "synthesis rounding").
+// Columns first (LL with LH; HL with HH), then rows. Odd-odd output
+// pixels interpolate vertical averages floored to quarters; all other
+// pixels are exact. Matches the ECW SDK's general path (FINDINGS.md
+// "synthesis rounding").
 // Only a window is produced, from a coefficient window padded by one
 // (requiredCoefficientWindow), so huge levels never load whole.
 //==========================================================
@@ -57,8 +58,9 @@ function synth1d(s, d, len, o0, o1, out, outStride, outOffset, roundAverage) {
 
 /**
  * Synthesise output window [x0, x1) x [y0, y1) of the 2w x 2h image.
- * Columns first (LL with LH, HL with HH; odd-row averages floored to
- * quarters, as the ECW SDK does), then rows (exact).
+ * Columns first (LL with LH, HL with HH), then rows. Odd-odd output
+ * pixels interpolate vertical averages floored to quarters; every other
+ * pixel uses exact arithmetic (the ECW SDK's general path).
  * @param {{w:number, h:number, x0:number, y0:number, width:number, height:number,
  *   LL:Float32Array, LH:Float32Array, HL:Float32Array, HH:Float32Array}} src
  *   Coefficient window: plane values for coefficient columns [x0, x0+width)
@@ -77,9 +79,12 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 	var cols = need.x1 - need.x0;
 	var w = src.w;
 	var h = src.h;
-	// lo[y][c] / hi[y][c]: vertical synthesis of coefficient column c at output row y
+	// lo / hi: exact vertical synthesis of coefficient column c at output row y;
+	// loQ / hiQ: the same with odd-row averages floored to quarters (used by odd-odd pixels)
 	var lo = new Float32Array(cols * outH);
 	var hi = new Float32Array(cols * outH);
+	var loQ = new Float32Array(cols * outH);
+	var hiQ = new Float32Array(cols * outH);
 
 	// Step 1) Column pass for every needed coefficient column
 	for (var c = need.x0; c < need.x1; c++) {
@@ -90,20 +95,28 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 		var column = c;
 		var rounding = src.floorAt ? function (avg, k) { return src.floorAt(column, k) ? quarterFloor(avg) : avg; } : quarterFloor;
 		sPlane = src.LL; dPlane = src.LH;
-		synth1d(sv, dv, h, y0, y1, lo, cols, c - need.x0, rounding);
+		synth1d(sv, dv, h, y0, y1, lo, cols, c - need.x0, null);
+		synth1d(sv, dv, h, y0, y1, loQ, cols, c - need.x0, rounding);
 		sPlane = src.HL; dPlane = src.HH;
-		synth1d(sv, dv, h, y0, y1, hi, cols, c - need.x0, rounding);
+		synth1d(sv, dv, h, y0, y1, hi, cols, c - need.x0, null);
+		synth1d(sv, dv, h, y0, y1, hiQ, cols, c - need.x0, rounding);
 	}
 
-	// Step 2) Row pass
+	// Step 2) Row pass: even rows and even columns exact; odd-odd from the floored columns
 	var out = new Float32Array(outW * outH);
 	for (var r = 0; r < outH; r++) {
 		var base = r * cols - need.x0;
-		synth1d(
-			function (k) { return lo[base + clamp(k, w)]; },
-			function (k) { return hi[base + clamp(k, w)]; },
-			w, x0, x1, out, 1, r * outW, null
-		);
+		var oddRow = ((y0 + r) & 1) === 1;
+		var L = function (k) { return lo[base + clamp(k, w)]; };
+		var H = function (k) { return hi[base + clamp(k, w)]; };
+		var LQ = oddRow ? function (k) { return loQ[base + clamp(k, w)]; } : L;
+		var HQ = oddRow ? function (k) { return hiQ[base + clamp(k, w)]; } : H;
+		for (var x = x0; x < x1; x++) {
+			var kx = x >> 1;
+			out[r * outW + x - x0] = (x & 1) === 0
+				? L(kx) - (H(clamp(kx - 1, w)) + H(kx)) / 2
+				: (LQ(kx) + LQ(clamp(kx + 1, w))) / 2 + HQ(kx);
+		}
 	}
 	return out;
 }

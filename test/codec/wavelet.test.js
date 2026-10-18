@@ -86,12 +86,12 @@ test("missing coefficients for the window throw INVALID_ARGUMENT", function () {
 	assert.throws(function () { synthesizeWindow(p, 0, 0, 4, 4); }, { code: "INVALID_ARGUMENT" });
 });
 
-test("vertical averages floor to quarters (the SDK's general path)", function () {
+test("odd-odd pixels use vertical averages floored to quarters; even columns stay exact", function () {
 	var p = planes(1, 2);
 	p.LL[0] = 10.125; p.LL[1] = 10.25;
 	var out = synthesizeWindow(p, 0, 0, 2, 4);
-	// rows: 10.125 | floor4((10.125 + 10.25) / 2 = 10.1875) = 10 | 10.25 | floor4(10.25) = 10.25
-	assert.deepEqual(Array.from(out), [10.125, 10.125, 10, 10, 10.25, 10.25, 10.25, 10.25]);
+	// odd row 1: even column keeps the exact average 10.1875; odd column interpolates floor4(10.1875) = 10
+	assert.deepEqual(Array.from(out), [10.125, 10.125, 10.1875, 10, 10.25, 10.25, 10.25, 10.25]);
 });
 
 test("horizontal averages stay exact", function () {

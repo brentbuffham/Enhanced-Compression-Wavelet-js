@@ -105,8 +105,11 @@ function twoPass(src, x0, y0, x1, y1, cfg) {
 		var v;
 		if (cfg.order === "cols") {
 			// first vertical on columns kx (low-x plane pair LL/LH and high-x pair HL/HH), then horizontal
-			var colL = function (cx) { return synthAt(function (k) { return S(src.LL, cx, k); }, function (k) { return S(src.LH, cx, k); }, y, h, cfg.firstOdd, cfg.firstEven); };
-			var colH = function (cx) { return synthAt(function (k) { return S(src.HL, cx, k); }, function (k) { return S(src.HH, cx, k); }, y, h, cfg.firstOdd, cfg.firstEven); };
+			// cfg.oddOddOnly: firstOdd rounding only feeds odd-x outputs (even-x outputs use exact averages)
+			var fOdd = cfg.oddOddOnly && (x & 1) === 0 ? function (q) { return q / 2; } : cfg.firstOdd;
+			var fOddH = cfg.oddOddOnly && (x & 1) === 0 ? function (q) { return q / 2; } : (cfg.firstOddHigh || cfg.firstOdd);
+			var colL = function (cx) { return synthAt(function (k) { return S(src.LL, cx, k); }, function (k) { return S(src.LH, cx, k); }, y, h, fOdd, cfg.firstEven); };
+			var colH = function (cx) { return synthAt(function (k) { return S(src.HL, cx, k); }, function (k) { return S(src.HH, cx, k); }, y, h, fOddH, cfg.firstEven); };
 			v = synthAt(colL, colH, x, w, cfg.secondOdd, cfg.secondEven);
 		} else {
 			var rowL = function (cy) { return synthAt(function (k) { return S(src.LL, k, cy); }, function (k) { return S(src.HL, k, cy); }, x, w, cfg.firstOdd, cfg.firstEven); };
