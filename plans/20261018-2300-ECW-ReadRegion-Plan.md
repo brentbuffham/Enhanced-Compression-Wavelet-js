@@ -1,12 +1,10 @@
 # ECW readRegion Implementation Plan (Plan 3)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans. Steps use checkbox (`- [ ]`) syntax.
-
 **Goal:** Promote the cracked codec into `src/` test-first and implement `readRegion`, so the library and the demo return real imagery (within ±3 of GDAL; exact parity is the follow-up hunt).
 
 **Architecture:** Pure codec modules (`src/codec/`), a windowed recursive reconstructor that decodes only the blocks a window needs, and `EcwReader.readRegion` on top. Evidence for every rule: `_dev/ecw-decode/FINDINGS.md`.
 
-**Spec:** `docs/superpowers/specs/2026-10-18-ecw-decoder-design.md` (§4 API, §6 data flow). Pass criterion is relaxed for this plan by Brent's decision (2026-10-18): ship within ±3, keep hunting the last ±1.
+**Spec:** `docs/design/2026-10-18-ecw-decoder-design.md` (§4 API, §6 data flow). Pass criterion is relaxed for this plan by Brent's decision (2026-10-18): ship within ±3, keep hunting the last ±1.
 
 ## Global Constraints
 

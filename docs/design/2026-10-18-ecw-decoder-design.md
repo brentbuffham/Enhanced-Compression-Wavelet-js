@@ -22,8 +22,8 @@ Ground truth comes from decoding the same file with QGIS's bundled GDAL (ECW SDK
 2. Tests run on Node's built-in runner (`node --test`).
 3. OPFS scratch binary files hold large decoded outputs and the decoded-block cache. Input files are read in place with `File.slice`.
 4. Reverse-engineering method follows Kirra's DUF / BMF / Vulcan work (section 8).
-5. Test-driven per the superpowers `test-driven-development` skill: every behaviour lands as a failing test first, then the code that passes it.
-6. No completion claim without running the tests and showing the output (superpowers `verification-before-completion`).
+5. Test-driven: every behaviour lands as a failing test first, then the code that passes it.
+6. No completion claim without running the tests and showing the output.
 7. Sample data is private. Real ECW files and anything derived from them live in gitignored `samples/` and are never committed or published.
 
 ## 3. Scope
@@ -174,7 +174,7 @@ One commit per phase; each updates `FINDINGS.md` and adds tests.
 
 ## 10. Testing
 
-- Test-first for all `src/` code (red → green → refactor), per the superpowers TDD skill.
+- Test-first for all `src/` code (red → green → refactor).
 - `test/` mirrors `src/` (`test/format/EcwHeader.test.js`, …). Files are `*.test.js`, using `node:test` and `node:assert/strict`.
 - **Unit tests** use synthetic byte buffers built by small helpers in `test/helpers/` — no private data needed, so CI runs them all.
 - **OPFS tests** use a mock `FileSystemSyncAccessHandle` with a tiny window size to force refills across window edges.

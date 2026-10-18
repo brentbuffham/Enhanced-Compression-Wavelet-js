@@ -1,26 +1,24 @@
 # ECW Foundation Implementation Plan (Plan 1 of 2)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Ship a tested, zero-dependency npm package that reads ECW header, georeferencing and level table, plus the codec-independent pieces (byte sources, OPFS scratch, transparency, polygon clip, reference tooling), and end with the block offset table researched and documented.
 
 **Architecture:** Pure, DOM-free layers (io → format → post) over a sync byte-source contract; an async `BlobSource` reads ranges from a `File` which are parsed through `MemorySource`. Reverse-engineering probes live in `_dev/ecw-decode/` beside a `FINDINGS.md` log; facts move into `src/` only through a failing test. Plan 2 (written after Task 13) covers the block index, the wavelet codec, `BlockCache`, the Worker and `readRegion`.
 
 **Tech Stack:** Vanilla JavaScript ES modules, Node ≥ 22 built-in test runner (`node:test`, `node:assert/strict`), OPFS (`FileSystemSyncAccessHandle`), QGIS 4.2.3 bundled GDAL (ECW SDK 5.5) as black-box ground truth.
 
-**Spec:** `docs/superpowers/specs/2026-10-18-ecw-decoder-design.md`
+**Spec:** `docs/design/2026-10-18-ecw-decoder-design.md`
 
 ## Global Constraints
 
 - Zero `dependencies` and zero `devDependencies`; no build step; no TypeScript.
 - `"type": "module"`, `"engines": { "node": ">=22" }`, `"sideEffects": false`, `"files": ["src", "README.md", "LICENSE", "CHANGELOG.md"]`.
 - Tests: `node --test "test/**/*.test.js"`; files named `*.test.js`, mirroring `src/` under `test/`.
-- Test-first for every `src/` behaviour (superpowers `test-driven-development`): watch the test fail before writing code.
-- No completion claim without running `npm test` and showing its output (superpowers `verification-before-completion`).
+- Test-first for every `src/` behaviour: watch the test fail before writing code.
+- No completion claim without running `npm test` and showing its output.
 - Style: `var`, tabs, function declarations (constructor + prototype instead of `class`, except `EcwError extends Error`), JSDoc on every export, each file opens with `// src/path/File.js` and a `//=====` banner (purpose, rationale, `FINDINGS.md` reference). Hex-named constants (`HEADER_WIDTH_OFFSET = 0x06`). Error messages name the offset.
 - 64-bit values built as `hi * 4294967296 + lo`, never `<<`; return `null` above `Number.MAX_SAFE_INTEGER`.
 - Private data never enters git: `samples/` is gitignored; tests, docs and commits use synthetic values only. Sample tests read expected values from `samples/ref/gdalinfo.json` at runtime and `t.skip()` when files are missing.
-- Commit after every task, to `main`, message ending with `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
+- Commit after every task, to `main`.
 
 ## Review Focus
 
@@ -509,7 +507,7 @@ Research, not TDD: the deliverable is evidence and a documented layout, not `src
 
 **Files:**
 - Create: `_dev/ecw-decode/blockTable.mjs`
-- Modify: `_dev/ecw-decode/FINDINGS.md`, `docs/superpowers/specs/2026-10-18-ecw-decoder-design.md` (§7)
+- Modify: `_dev/ecw-decode/FINDINGS.md`, `docs/design/2026-10-18-ecw-decoder-design.md` (§7)
 
 **Questions to answer, each with evidence in FINDINGS:**
 1. What the bytes between `levelTableEnd` (`0x59 + 21 × levelCount`) and the first rising u64 mean (`00 'R' 'M' 09 01 …`).
@@ -525,7 +523,7 @@ Research, not TDD: the deliverable is evidence and a documented layout, not `src
 - [ ] **Step 4:** `node _dev/ecw-decode/byteStats.mjs` on the first three blocks of the coarsest level and record entropy and the first 64 bytes of each (feeds Plan 2's codec work).
 - [ ] **Step 5:** Update spec §7 with the confirmed layout.
 - [ ] **Step 6: Commit** — `docs: block offset table findings`
-- [ ] **Step 7:** Write Plan 2 (`aiPlans/YYYYMMDD-HHMM-ECW-Codec-Plan.md`) covering `EcwBlockIndex`, block internals, codec, `BlockCache`, Worker, `readRegion`/`readRegionToScratch` with post-steps, browser demo, and `0.1.0` release prep.
+- [ ] **Step 7:** Write Plan 2 (`plans/YYYYMMDD-HHMM-ECW-Codec-Plan.md`) covering `EcwBlockIndex`, block internals, codec, `BlockCache`, Worker, `readRegion`/`readRegionToScratch` with post-steps, browser demo, and `0.1.0` release prep.
 
 **Done when:** a stranger can locate any block's bytes from FINDINGS alone, and Plan 2 exists.
 
