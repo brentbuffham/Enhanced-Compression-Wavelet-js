@@ -3,7 +3,12 @@
 // Canvas viewer: shows one RGBA "picture" spanning map bounds,
 // with wheel zoom, drag pan, hover reporting and a polygon tool.
 // Block maps are drawn nearest-neighbour so they stay crisp; decoded
-// images (picture.smooth) are drawn with high-quality smoothing.
+// images (picture.smooth) are drawn with high-quality smoothing, or
+// pixel for pixel when the view is at scale 1.
+// Colour: the canvas works in Display P3 where supported. Pixels are
+// tagged sRGB (colour-managed, correct) or, with setVivid(true), Display
+// P3, so a wide-gamut screen shows the raw values unconverted, the way
+// QGIS and other unmanaged viewers do.
 // An optional detail layer (a sharper decode of the visible area)
 // is drawn over the picture; onViewChange fires when zoom/pan settle.
 //==========================================================
@@ -16,7 +21,8 @@ import { screenToMap, mapToScreen } from "./lib/viewMath.js";
  */
 export function Viewer(canvas, callbacks) {
 	this.canvas = canvas;
-	this.ctx = canvas.getContext("2d");
+	this.ctx = canvas.getContext("2d", { colorSpace: "display-p3" }) || canvas.getContext("2d");
+	this.vivid = false;
 	this.callbacks = callbacks || {};
 	this.picture = null;
 	this.bitmap = null;
@@ -43,15 +49,39 @@ Viewer.prototype._resize = function () {
  * @param {{rgba: Uint8ClampedArray, width: number, height: number, bounds: object, smooth?: boolean}} picture
  * @param {boolean} [keepView] - keep zoom/pan when the picture size is unchanged
  */
+// An offscreen canvas holding rgba, tagged sRGB or (vivid) Display P3
+Viewer.prototype._bitmap = function (rgba, width, height) {
+	var space = this.vivid ? "display-p3" : "srgb";
+	var off = document.createElement("canvas");
+	off.width = width;
+	off.height = height;
+	var ctx = off.getContext("2d", { colorSpace: space }) || off.getContext("2d");
+	var image;
+	try {
+		image = new ImageData(rgba, width, height, { colorSpace: space });
+	} catch (err) {
+		image = new ImageData(rgba, width, height);
+	}
+	ctx.putImageData(image, 0, 0);
+	return off;
+};
+
+/**
+ * Show raw pixel values on wide-gamut screens (like unmanaged viewers) or colour-manage them.
+ * @param {boolean} vivid
+ */
+Viewer.prototype.setVivid = function (vivid) {
+	this.vivid = !!vivid;
+	if (this.picture) this.bitmap = this._bitmap(this.picture.rgba, this.picture.width, this.picture.height);
+	if (this.detail) this.detail.bitmap = this._bitmap(this.detail.rgba, this.detail.width, this.detail.height);
+	this.draw();
+};
+
 Viewer.prototype.setPicture = function (picture, keepView) {
 	var sameSize = this.picture && this.picture.width === picture.width && this.picture.height === picture.height;
 	this.picture = picture;
 	this.detail = null;
-	var off = document.createElement("canvas");
-	off.width = picture.width;
-	off.height = picture.height;
-	off.getContext("2d").putImageData(new ImageData(picture.rgba, picture.width, picture.height), 0, 0);
-	this.bitmap = off;
+	this.bitmap = this._bitmap(picture.rgba, picture.width, picture.height);
 	if (!(keepView && sameSize)) {
 		this._userMoved = false;
 		this.fit();
@@ -64,10 +94,12 @@ Viewer.prototype.setPicture = function (picture, keepView) {
 Viewer.prototype.fit = function () {
 	var p = this.picture;
 	var scale = Math.min(this.canvas.width / p.width, this.canvas.height / p.height) * 0.95;
+	// a picture made for this canvas fits at scale 1: draw it pixel for pixel
+	if (Math.abs(scale - 1) < 0.02) scale = 1;
 	this.view = {
 		bounds: p.bounds, width: p.width, height: p.height, scale: scale,
-		offsetX: (this.canvas.width - p.width * scale) / 2,
-		offsetY: (this.canvas.height - p.height * scale) / 2
+		offsetX: Math.round((this.canvas.width - p.width * scale) / 2),
+		offsetY: Math.round((this.canvas.height - p.height * scale) / 2)
 	};
 };
 
@@ -76,11 +108,7 @@ Viewer.prototype.fit = function () {
  * @param {{rgba: Uint8ClampedArray, width: number, height: number, bounds: object}} detail
  */
 Viewer.prototype.setDetail = function (detail) {
-	var off = document.createElement("canvas");
-	off.width = detail.width;
-	off.height = detail.height;
-	off.getContext("2d").putImageData(new ImageData(detail.rgba, detail.width, detail.height), 0, 0);
-	this.detail = { bitmap: off, bounds: detail.bounds };
+	this.detail = { bitmap: this._bitmap(detail.rgba, detail.width, detail.height), rgba: detail.rgba, width: detail.width, height: detail.height, bounds: detail.bounds };
 	this.draw();
 };
 
@@ -112,9 +140,10 @@ Viewer.prototype.draw = function () {
 	ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 	if (!this.bitmap || !this.view) return;
 	var v = this.view;
-	ctx.imageSmoothingEnabled = !!this.picture.smooth;
+	ctx.imageSmoothingEnabled = !!this.picture.smooth && v.scale !== 1;
 	ctx.imageSmoothingQuality = "high";
-	ctx.drawImage(this.bitmap, v.offsetX, v.offsetY, v.width * v.scale, v.height * v.scale);
+	if (v.scale === 1) ctx.drawImage(this.bitmap, Math.round(v.offsetX), Math.round(v.offsetY));
+	else ctx.drawImage(this.bitmap, v.offsetX, v.offsetY, v.width * v.scale, v.height * v.scale);
 	if (this.detail) {
 		var tl = mapToScreen(v, this.detail.bounds.minX, this.detail.bounds.maxY);
 		var br = mapToScreen(v, this.detail.bounds.maxX, this.detail.bounds.minY);

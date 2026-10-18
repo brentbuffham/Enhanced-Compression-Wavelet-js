@@ -361,8 +361,9 @@ async function refineView() {
 
 function fillWhole() {
 	var i = reader.info;
-	var wrap = $("viewerWrap");
-	var fit = Math.min(1, Math.max(wrap.clientWidth, 800) * (window.devicePixelRatio || 1) / i.width, Math.max(wrap.clientHeight, 500) * (window.devicePixelRatio || 1) / i.height);
+	// exactly the size the viewer fits the image to (95% of the canvas), so it is drawn pixel for pixel
+	var canvas = $("viewer");
+	var fit = Math.min(1, Math.max(canvas.width, 800) * 0.95 / i.width, Math.max(canvas.height, 500) * 0.95 / i.height);
 	$("readX").value = 0;
 	$("readY").value = 0;
 	$("readW").value = i.width;
@@ -505,6 +506,18 @@ try { $("cacheToggle").checked = localStorage.getItem("ecw-demo-cache") === "1";
 $("cacheToggle").addEventListener("change", function (e) {
 	try { localStorage.setItem("ecw-demo-cache", e.target.checked ? "1" : "0"); } catch (err) { /* storage blocked */ }
 });
+// Vivid colour only matters on wide-gamut screens; on by default there, to look like QGIS
+if (window.matchMedia && matchMedia("(color-gamut: p3)").matches) {
+	$("vividLabel").classList.remove("hidden");
+	var vividSaved = null;
+	try { vividSaved = localStorage.getItem("ecw-demo-vivid"); } catch (err) { /* storage blocked */ }
+	$("vividToggle").checked = vividSaved !== "0";
+	viewer.setVivid($("vividToggle").checked);
+	$("vividToggle").addEventListener("change", function (e) {
+		viewer.setVivid(e.target.checked);
+		try { localStorage.setItem("ecw-demo-vivid", e.target.checked ? "1" : "0"); } catch (err) { /* storage blocked */ }
+	});
+}
 try { $("keepToggle").checked = localStorage.getItem("ecw-demo-keep") === "1"; } catch (err) { /* storage blocked */ }
 $("keepToggle").addEventListener("change", function (e) {
 	try { localStorage.setItem("ecw-demo-keep", e.target.checked ? "1" : "0"); } catch (err) { /* storage blocked */ }
