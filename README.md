@@ -7,6 +7,12 @@ A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, p
 - Working: `openEcw` reads the header, georeferencing and resolution levels.
 - Not yet: pixel decoding. `readRegion` rejects with `NOT_IMPLEMENTED` until the block format is worked out.
 
+## Demo
+
+Try it in the browser: **https://brentbuffham.github.io/Enhanced-Compression-Wavelet-js/**
+
+Drop an ECW file onto the page. It shows the header, georeferencing, a map of compressed block sizes, stream statistics, and lets you run every library function from a side panel. Your file is read locally and never uploaded. To run it locally: `npm run demo`, then open http://localhost:8080/.
+
 ## Why
 
 ECW is a common format for large orthophotos, and the only way to read it so far has been Hexagon's ECW SDK, either directly or through GDAL. There's no open decoder you can drop into a web page. This is an attempt at one.

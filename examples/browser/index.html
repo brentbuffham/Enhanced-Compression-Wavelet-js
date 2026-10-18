@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>ecw-js demo</title>
+	<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+	<header class="topbar">
+		<div class="brand"><strong>ecw-js</strong> <span class="muted">demo</span></div>
+		<div class="file-name" id="fileName">Drop an .ecw file anywhere</div>
+		<label class="button">
+			Open file
+			<input type="file" id="fileInput" accept=".ecw" hidden>
+		</label>
+		<button class="icon-button" id="togglePanel" title="Show or hide the side panel" aria-label="Toggle panel">☰</button>
+	</header>
+
+	<main class="layout">
+		<section class="viewer" id="viewerWrap">
+			<canvas id="viewer"></canvas>
+			<div class="viewer-empty" id="viewerEmpty">
+				<p><strong>Drop an ECW file here</strong></p>
+				<p class="muted">Your file never leaves your browser. Everything is read locally, in a Worker.</p>
+			</div>
+			<div class="viewer-hud" id="hud"></div>
+		</section>
+
+		<aside class="panel" id="panel">
+			<nav class="tabs" role="tablist">
+				<button class="tab active" data-tab="info" role="tab">Info</button>
+				<button class="tab" data-tab="blocks" role="tab">Blocks</button>
+				<button class="tab" data-tab="clip" role="tab">Clip</button>
+				<button class="tab" data-tab="read" role="tab">Read</button>
+			</nav>
+
+			<div class="tab-body" id="tab-info">
+				<p class="muted" id="infoEmpty">Open a file to see its header, georeferencing and levels.</p>
+				<table class="kv" id="infoTable"></table>
+				<h3>Levels</h3>
+				<table class="grid-table" id="levelTable"></table>
+			</div>
+
+			<div class="tab-body hidden" id="tab-blocks">
+				<label class="field">Level
+					<select id="levelSelect" disabled></select>
+				</label>
+				<p class="muted">Each pixel is one 64×64 block, coloured by its compressed size. Big blocks hold photo detail; tiny ones are empty background.</p>
+				<div class="row">
+					<button class="button" id="sampleButton" disabled>Sample stream modes</button>
+					<input type="number" id="sampleCount" value="300" min="1" max="5000" title="Blocks to sample">
+				</div>
+				<table class="kv" id="levelStats"></table>
+				<h3>Block under the cursor</h3>
+				<div id="blockDetail" class="muted">Hover over the map.</div>
+			</div>
+
+			<div class="tab-body hidden" id="tab-clip">
+				<p class="muted">Tries the optional post-steps on the current picture.</p>
+				<div class="row">
+					<button class="button" id="drawButton" disabled>Draw polygon</button>
+					<button class="button" id="clearPolygon" disabled>Clear</button>
+				</div>
+				<p class="muted small">Click to add points, double-click to finish. Points are in map coordinates.</p>
+				<label class="field">transparentBelow
+					<input type="number" id="thresholdInput" min="0" max="255" value="60">
+				</label>
+				<div class="row">
+					<button class="button" id="applyClip" disabled>Apply</button>
+					<button class="button" id="resetClip" disabled>Reset picture</button>
+				</div>
+			</div>
+
+			<div class="tab-body hidden" id="tab-read">
+				<p class="muted">Decodes pixels with <code>readRegion</code>. Pixel decoding is still being reverse-engineered, so for now this shows the library's <code>NOT_IMPLEMENTED</code> error.</p>
+				<div class="form-grid">
+					<label>x <input type="number" id="readX" value="0"></label>
+					<label>y <input type="number" id="readY" value="0"></label>
+					<label>width <input type="number" id="readW" value="4096"></label>
+					<label>height <input type="number" id="readH" value="4096"></label>
+					<label>outWidth <input type="number" id="readOutW" value="1024"></label>
+					<label>outHeight <input type="number" id="readOutH" value="1024"></label>
+				</div>
+				<button class="button" id="readButton" disabled>Run readRegion</button>
+			</div>
+
+			<section class="how">
+				<h3>How it works</h3>
+				<pre id="howCode"><code>// Library calls appear here as you use the demo.</code></pre>
+			</section>
+		</aside>
+	</main>
+
+	<footer class="statusbar">
+		<div class="progress-wrap">
+			<progress id="progress" max="1" value="0"></progress>
+			<span id="progressLabel" class="muted">Idle</span>
+		</div>
+		<div class="stats" id="stats"></div>
+	</footer>
+
+	<div class="drop-overlay hidden" id="dropOverlay">Drop to open</div>
+
+	<script type="module" src="demo.js"></script>
+</body>
+</html>
