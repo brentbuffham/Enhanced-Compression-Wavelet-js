@@ -45,33 +45,27 @@ var LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
 //----------------------------------------------------------
 
 // { width, height, kind, planes } with Int16 eighths when every value allows it
+// (converted and checked in one pass), otherwise Float32 copies
 function encodeTile(tile) {
-	var eighths = tile.bands.every(function (band) {
+	var planes = [];
+	for (var b = 0; b < tile.bands.length; b++) {
+		var band = tile.bands[b], out = new Int16Array(band.length);
 		for (var i = 0; i < band.length; i++) {
 			var v = band[i] * 8;
-			if (v !== Math.floor(v) || v < -32768 || v > 32767) return false;
+			out[i] = v;
+			if (out[i] !== v) break;
 		}
-		return true;
-	});
-	var planes = tile.bands.map(function (band) {
-		if (!eighths) return Float32Array.from(band);
-		var out = new Int16Array(band.length);
-		for (var i = 0; i < band.length; i++) out[i] = band[i] * 8;
-		return out;
-	});
-	return { width: tile.width, height: tile.height, kind: eighths ? KIND_EIGHTHS : KIND_FLOAT, planes: planes };
+		if (i < band.length) {
+			return { width: tile.width, height: tile.height, kind: KIND_FLOAT, planes: tile.bands.map(function (p) { return Float32Array.from(p); }) };
+		}
+		planes.push(out);
+	}
+	return { width: tile.width, height: tile.height, kind: KIND_EIGHTHS, planes: planes };
 }
 
-function decodeTile(enc) {
-	return {
-		width: enc.width, height: enc.height,
-		bands: enc.planes.map(function (p) {
-			if (enc.kind === KIND_FLOAT) return Float32Array.from(p);
-			var out = new Float32Array(p.length);
-			for (var i = 0; i < p.length; i++) out[i] = p[i] / 8;
-			return out;
-		})
-	};
+// The stored planes themselves (read-only for callers): value = band[i] * scale
+function tileView(enc) {
+	return { width: enc.width, height: enc.height, bands: enc.planes, scale: enc.kind === KIND_EIGHTHS ? 1 / 8 : 1 };
 }
 
 function encodedBytes(enc) {
@@ -217,7 +211,9 @@ BlockCache.prototype._key = function (j, tx, ty) {
 };
 
 /**
- * @returns {Promise<{width:number, height:number, bands:Float32Array[]}|null>}
+ * The cached tile, or null. Its bands are the cache's own storage (do not
+ * modify): Int16 eighths with scale 1/8, or Float32 with scale 1.
+ * @returns {Promise<{width:number, height:number, bands:(Int16Array|Float32Array)[], scale:number}|null>}
  */
 BlockCache.prototype.get = async function (j, tx, ty) {
 	var key = this._key(j, tx, ty);
@@ -226,7 +222,7 @@ BlockCache.prototype.get = async function (j, tx, ty) {
 		this._memory.delete(key);
 		this._memory.set(key, hit);
 		this._stats.hits++;
-		return decodeTile(hit);
+		return tileView(hit);
 	}
 	if (this._opfs) {
 		var enc = await this._readTile(key);
@@ -234,7 +230,7 @@ BlockCache.prototype.get = async function (j, tx, ty) {
 			this._stats.hits++;
 			this._stats.opfsHits++;
 			this._remember(key, enc);
-			return decodeTile(enc);
+			return tileView(enc);
 		}
 	}
 	this._stats.misses++;

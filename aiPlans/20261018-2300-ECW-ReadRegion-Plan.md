@@ -60,6 +60,12 @@ Plan 1 constraints apply (zero deps, `node --test`, test-first, style, no privat
 - Ruling: OPFS writes go into ~8 MB pack files with an index footer, flushed at the end of each read; one file per tile cost 23.8 s for a thumbnail (4,440 files) in Chrome. Whole packs are read back once and kept (4) for later tiles. Chrome: thumbnail 3.2 s uncached, 3.4 s while writing packs, 363 ms reopened after a reload.
 - OPFS tier opt-in (`cache: { opfs: true }`), keyed by fileFingerprint (name, size, lastModified, first 4 KB, CACHE_VERSION); failures are misses, never errors.
 
+### Task 10: Synthesis speed-up
+- Guard: a frozen copy of the straightforward synthesis (test/helpers/referenceWavelet.js) and a 300-case random equivalence test (windows, edges, odd sizes, per-coefficient subband masks), checked to catch planted rounding and indexing mutations.
+- synthesizeWindow: row-major passes with precomputed clamped row offsets (no per-sample closures), floored averages only on odd rows, subbandsAt once per coefficient per row with an all-subbands fast path. Coefficient copies use native typed-array set for long rows.
+- Tile cache: tiles hand out their Int16 planes with scale 1/8 (no decode copy); the bounding box of the missing tiles is synthesised in one call, then split and stored.
+- Sample, 2048² views: uncached first view 970 -> 608 ms; cached first view 1200 -> 821 ms, x2 zoom-in 735 -> 483 ms, repeat ~120 ms. Thumbnail uncached 1889 -> 1020 ms.
+
 ### Task 8: Worker entry `ecw-js/worker`
 - `src/workers/ecwDecodeWorker.js`: message protocol `{ id, type: "open" | "readRegion" | "readRegionToScratch" | "close", payload }` in; `{ id, type: "progress" | "result" | "error" }` out; pixel buffers transferred. Protocol logic lives in a pure `createWorkerHandler(post)` so Node tests drive it without a Worker.
 - `package.json` exports `./worker`.

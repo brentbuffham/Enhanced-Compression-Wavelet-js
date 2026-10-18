@@ -21,10 +21,12 @@ function tile(width, height, seed, step) {
 	});
 	return { width: width, height: height, bands: bands };
 }
+// a tile's values: band[i] * scale (scale defaults to 1)
+function values(t, b) { return Array.from(t.bands[b], function (v) { return v * (t.scale || 1); }); }
 function same(a, b) {
 	assert.equal(a.width, b.width);
 	assert.equal(a.height, b.height);
-	for (var i = 0; i < 3; i++) assert.deepEqual(Array.from(a.bands[i]), Array.from(b.bands[i]));
+	for (var i = 0; i < 3; i++) assert.deepEqual(values(a, i), values(b, i));
 }
 var TILE_BYTES = 4 * 4 * 3 * 2; // a 4x4, 3-band tile held as Int16 eighths
 
@@ -53,6 +55,18 @@ test("eighths are held compactly; other values round-trip exactly as Float32", a
 	await c.put(1, 2, 0, tile(4, 4, 5000));
 	same(await c.get(1, 2, 0), tile(4, 4, 5000));
 	assert.equal(c.stats().memoryBytes, TILE_BYTES * 5);
+});
+
+test("get hands out the stored planes with a scale: Int16 eighths at 1/8, Float32 at 1", async function () {
+	var c = new BlockCache({ tileSize: 4 });
+	await c.put(1, 0, 0, tile(4, 4, 7));
+	await c.put(1, 1, 0, tile(4, 4, 7, 1 / 64));
+	var e = await c.get(1, 0, 0), f = await c.get(1, 1, 0);
+	assert.ok(e.bands[0] instanceof Int16Array);
+	assert.equal(e.scale, 1 / 8);
+	assert.ok(f.bands[0] instanceof Float32Array);
+	assert.equal(f.scale, 1);
+	assert.equal((await c.get(1, 0, 0)).bands[0], e.bands[0], "no copy per get");
 });
 
 test("memory tier evicts the least recently used tile past memoryBytes", async function () {

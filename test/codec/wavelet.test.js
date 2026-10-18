@@ -150,3 +150,33 @@ test("an empty LH in the output pixel's block drops the neighbour's LH too", fun
 	// rows: 100 - (16 + 16) / 2 = 84; 100 + 16 = 116; 100 (LH[0] dropped); 100
 	assert.deepEqual(Array.from(out), [84, 84, 116, 116, 100, 100, 100, 100]);
 });
+
+test("matches the reference synthesis bit for bit on random windows, sizes and subband masks", async function () {
+	var { referenceSynthesizeWindow } = await import("../helpers/referenceWavelet.js");
+	var seed = 12345;
+	// high bits: the low bits of a power-of-two LCG cycle too quickly
+	function rnd(n) { seed = (seed * 1103515245 + 12345) % 2147483648; return Math.floor(seed / 65536) % n; }
+	for (var t = 0; t < 300; t++) {
+		var w = 1 + rnd(9), h = 1 + rnd(9);
+		var p = planes(w, h);
+		["LL", "LH", "HL", "HH"].forEach(function (sb) {
+			for (var i = 0; i < p[sb].length; i++) p[sb][i] = sb === "LL" ? rnd(2001) / 8 - 50 : rnd(41) - 20 + (rnd(4) === 0 ? rnd(8) / 8 : 0);
+		});
+		if (t % 3) {
+			var masks = new Int8Array(w * h).map(function () { return rnd(8); });
+			p.subbandsAt = function (c, k) { return masks[k * w + c]; };
+		}
+		var x0 = rnd(2 * w), x1 = x0 + 1 + rnd(2 * w - x0), y0 = rnd(2 * h), y1 = y0 + 1 + rnd(2 * h - y0);
+		var got = synthesizeWindow(p, x0, y0, x1, y1);
+		var want = referenceSynthesizeWindow(p, x0, y0, x1, y1);
+		assert.deepEqual(Array.from(got), Array.from(want), "case " + t + ": " + w + "x" + h + " window " + [x0, y0, x1, y1]);
+		// and from a coefficient window that only just covers the output
+		var c = requiredCoefficientWindow(w, h, x0, y0, x1, y1);
+		var sub = { w: w, h: h, x0: c.x0, y0: c.y0, width: c.x1 - c.x0, height: c.y1 - c.y0, subbandsAt: p.subbandsAt };
+		["LL", "LH", "HL", "HH"].forEach(function (sb) {
+			sub[sb] = new Float32Array(sub.width * sub.height);
+			for (var y = 0; y < sub.height; y++) for (var x = 0; x < sub.width; x++) sub[sb][y * sub.width + x] = p[sb][(c.y0 + y) * w + c.x0 + x];
+		});
+		assert.deepEqual(Array.from(synthesizeWindow(sub, x0, y0, x1, y1)), Array.from(want), "case " + t + " (tight window)");
+	}
+});

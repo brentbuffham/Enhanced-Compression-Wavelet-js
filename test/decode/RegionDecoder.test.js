@@ -246,3 +246,27 @@ test("a repeat window served from the tile cache fetches no blocks", async funct
 	assert.equal(second.fetches(), 0);
 	assert.deepEqual(Array.from(b.bands[0]), Array.from(a.bands[0]));
 });
+
+test("a pan synthesises only the newly exposed tiles", async function () {
+	var bytes = buildCodedFile({ width: 128, height: 64, levelCount: 3, coeff: hash }).bytes;
+	var cache = mapCache(8);
+	await decodeWindow(contextFor(bytes, { tileCache: cache }).ctx, 3, 0, 0, 64, 64);
+	var panned = contextFor(bytes, { tileCache: cache });
+	var fresh = contextFor(bytes);
+	var a = await decodeWindow(panned.ctx, 3, 32, 0, 96, 64);
+	var b = await decodeWindow(fresh.ctx, 3, 32, 0, 96, 64);
+	for (var band = 0; band < 3; band++) assert.deepEqual(Array.from(a.bands[band]), eighths(b.bands[band]));
+	assert.ok(panned.fetches() < fresh.fetches(), panned.fetches() + " < " + fresh.fetches());
+});
+
+test("tiles the cache drops are recomputed, output unchanged", async function () {
+	var bytes = buildCodedFile({ width: 61, height: 45, levelCount: 4, coeff: hash }).bytes;
+	var inner = mapCache(8), calls = 0;
+	// a forgetful cache: every third get misses, even for tiles it holds
+	var forgetful = { tileSize: 8, put: inner.put, get: async function (j, tx, ty) { return ++calls % 3 === 0 ? null : inner.get(j, tx, ty); } };
+	for (var k = 0; k < 3; k++) {
+		var got = await decodeWindow(contextFor(bytes, { tileCache: forgetful }).ctx, 4, 7 + k, 5, 50, 40);
+		var plain = await decodeWindow(contextFor(bytes).ctx, 4, 7 + k, 5, 50, 40);
+		for (var b = 0; b < 3; b++) assert.deepEqual(Array.from(got.bands[b]), eighths(plain.bands[b]), "pass " + k + " band " + b);
+	}
+});

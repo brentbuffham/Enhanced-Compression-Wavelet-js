@@ -34,32 +34,6 @@ function clamp(i, n) {
 	return i < 0 ? 0 : i >= n ? n - 1 : i;
 }
 
-// The SDK holds the vertical pass's averaged samples to quarter
-// precision (floor), then runs the horizontal pass exactly
-function quarterFloor(v) {
-	return Math.floor(v * 4) / 4;
-}
-
-// 1-D synthesis split into its two parts, for output samples [o0, o1):
-//   sPart: even s[k], odd (s[k] + s[k+1]) / 2 (roundAverage, when set, applied to the average)
-//   dPart: even -(d[k-1] + d[k]) / 2, odd d[k]
-// s(k) / d(k) take clamped global indices.
-function synthPart(f, isDetail, len, o0, o1, out, outStride, outOffset, roundAverage) {
-	for (var i = o0; i < o1; i++) {
-		var k = i >> 1;
-		var v;
-		if (isDetail) {
-			v = (i & 1) === 0 ? -(f(clamp(k - 1, len)) + f(k)) / 2 : f(k);
-		} else if ((i & 1) === 0) {
-			v = f(k);
-		} else {
-			v = (f(k) + f(clamp(k + 1, len))) / 2;
-			if (roundAverage) v = roundAverage(v);
-		}
-		out[outOffset + (i - o0) * outStride] = v;
-	}
-}
-
 // Subband bits for src.subbandsAt()
 var HAS_LH = 1;
 var HAS_HL = 2;
@@ -92,56 +66,91 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 	var cols = need.x1 - need.x0;
 	var w = src.w;
 	var h = src.h;
-	// Column parts of coefficient column c at output row y: LL / HL exact (lle, hle)
-	// and with odd-row averages floored to quarters (llq, hlq); LH / HH detail parts
+	var LL = src.LL, LH = src.LH, HL = src.HL, HH = src.HH, stride = src.width;
+	// Column parts of coefficient column c at output row y, row-major [r * cols + c - need.x0]:
+	// LL / HL exact (lle, hle), on odd rows also with averages floored to quarters (llq, hlq);
+	// LH / HH detail parts (lhd, hhd)
 	var size = cols * outH;
 	var lle = new Float32Array(size), llq = new Float32Array(size), lhd = new Float32Array(size);
 	var hle = new Float32Array(size), hlq = new Float32Array(size), hhd = new Float32Array(size);
 
-	// Step 1) Column pass for every needed coefficient column
-	for (var c = need.x0; c < need.x1; c++) {
-		var col = c - src.x0;
-		var plane;
-		var at = function (k) { return plane[(clamp(k, h) - src.y0) * src.width + col]; };
-		var o = c - need.x0;
-		plane = src.LL;
-		synthPart(at, false, h, y0, y1, lle, cols, o, null);
-		synthPart(at, false, h, y0, y1, llq, cols, o, quarterFloor);
-		plane = src.LH;
-		synthPart(at, true, h, y0, y1, lhd, cols, o, null);
-		plane = src.HL;
-		synthPart(at, false, h, y0, y1, hle, cols, o, null);
-		synthPart(at, false, h, y0, y1, hlq, cols, o, quarterFloor);
-		plane = src.HH;
-		synthPart(at, true, h, y0, y1, hhd, cols, o, null);
+	// Step 1) Column pass, one output row at a time (planes are row-major)
+	for (var r = 0; r < outH; r++) {
+		var y = y0 + r, k = y >> 1, o = r * cols;
+		var rowK = (clamp(k, h) - src.y0) * stride + need.x0 - src.x0;
+		var c, n = cols, i0, i1;
+		if ((y & 1) === 0) {
+			// even: s[k] - (d[k-1] + d[k]) / 2, split into the s part and the d part
+			var rowM = (clamp(k - 1, h) - src.y0) * stride + need.x0 - src.x0;
+			for (c = 0; c < n; c++) {
+				i0 = rowK + c;
+				i1 = rowM + c;
+				lle[o + c] = LL[i0];
+				lhd[o + c] = -(LH[i1] + LH[i0]) / 2;
+				hle[o + c] = HL[i0];
+				hhd[o + c] = -(HH[i1] + HH[i0]) / 2;
+			}
+		} else {
+			// odd: (s[k] + s[k+1]) / 2 + d[k]
+			var rowN = (clamp(k + 1, h) - src.y0) * stride + need.x0 - src.x0;
+			for (c = 0; c < n; c++) {
+				i0 = rowK + c;
+				i1 = rowN + c;
+				var avgL = (LL[i0] + LL[i1]) / 2, avgH = (HL[i0] + HL[i1]) / 2;
+				lle[o + c] = avgL;
+				llq[o + c] = Math.floor(avgL * 4) / 4;
+				lhd[o + c] = LH[i0];
+				hle[o + c] = avgH;
+				hlq[o + c] = Math.floor(avgH * 4) / 4;
+				hhd[o + c] = HH[i0];
+			}
+		}
 	}
 
 	// Step 2) Row pass: even rows and even columns exact; odd-odd from the floored columns.
 	// The block holding the output pixel decides which subbands take part.
 	var out = new Float32Array(outW * outH);
-	for (var r = 0; r < outH; r++) {
+	var kx0 = x0 >> 1, kx1 = ((x1 - 1) >> 1) + 1;
+	var masks = new Uint8Array(kx1 - kx0);
+	var subbandsAt = src.subbandsAt;
+	for (r = 0; r < outH; r++) {
 		var base = r * cols - need.x0;
 		var oddRow = ((y0 + r) & 1) === 1;
 		var ky = (y0 + r) >> 1;
 		var llQ = oddRow ? llq : lle;
 		var hlQ = oddRow ? hlq : hle;
+		var all = true;
+		for (var kx = kx0; kx < kx1; kx++) {
+			var mk = subbandsAt ? subbandsAt(kx, ky) : ALL_SUBBANDS;
+			masks[kx - kx0] = mk;
+			if (mk !== ALL_SUBBANDS) all = false;
+		}
+		var at = r * outW - x0;
 		for (var x = x0; x < x1; x++) {
-			var kx = x >> 1;
-			var m = src.subbandsAt ? src.subbandsAt(kx, ky) : ALL_SUBBANDS;
-			var i0 = base + kx;
-			var i1 = base + clamp(kx + 1, w);
+			var kxx = x >> 1;
+			var m = all ? ALL_SUBBANDS : masks[kxx - kx0];
+			var j0 = base + kxx;
+			var j1 = base + (kxx + 1 < w ? kxx + 1 : w - 1);
 			var v;
-			if (m === 0) {
-				v = (x & 1) === 0 ? lle[i0] : (lle[i0] + lle[i1]) / 2;
-			} else if ((x & 1) === 0) {
-				var im = base + clamp(kx - 1, w);
-				v = lle[i0] + ((m & HAS_LH) ? lhd[i0] : 0) - (highPass(m, hle, hhd, im) + highPass(m, hle, hhd, i0)) / 2;
+			if ((x & 1) === 0) {
+				var jm = base + (kxx > 0 ? kxx - 1 : 0);
+				if (m === ALL_SUBBANDS) {
+					v = lle[j0] + lhd[j0] - ((hle[jm] + hhd[jm]) + (hle[j0] + hhd[j0])) / 2;
+				} else if (m === 0) {
+					v = lle[j0];
+				} else {
+					v = lle[j0] + ((m & HAS_LH) ? lhd[j0] : 0) - (highPass(m, hle, hhd, jm) + highPass(m, hle, hhd, j0)) / 2;
+				}
+			} else if (m === ALL_SUBBANDS) {
+				v = (llQ[j0] + lhd[j0] + llQ[j1] + lhd[j1]) / 2 + (hlQ[j0] + hhd[j0]);
+			} else if (m === 0) {
+				v = (lle[j0] + lle[j1]) / 2;
 			} else {
-				var lh0 = (m & HAS_LH) ? lhd[i0] : 0;
-				var lh1 = (m & HAS_LH) ? lhd[i1] : 0;
-				v = (llQ[i0] + lh0 + llQ[i1] + lh1) / 2 + highPass(m, hlQ, hhd, i0);
+				var lh0 = (m & HAS_LH) ? lhd[j0] : 0;
+				var lh1 = (m & HAS_LH) ? lhd[j1] : 0;
+				v = (llQ[j0] + lh0 + llQ[j1] + lh1) / 2 + highPass(m, hlQ, hhd, j0);
 			}
-			out[r * outW + x - x0] = v;
+			out[at + x] = v;
 		}
 	}
 	return out;
