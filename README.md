@@ -8,6 +8,7 @@ A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, p
 - Accuracy: matches the ECW SDK (via GDAL) bit for bit on three independent test files, at full resolution and at every overview level.
 - Also: a ready-made module Worker (`ecw-js/worker`).
 - Not yet: writing ECW.
+- Built clean-room: no ECW SDK source code was used. See [Clean-room build](#clean-room-build).
 
 ## Install
 
@@ -27,11 +28,21 @@ Drop an ECW file onto the page. It shows the header, georeferencing, a map of co
 
 ECW is a common format for large orthophotos, and the only way to read it so far has been Hexagon's ECW SDK, either directly or through GDAL. There's no open decoder you can drop into a web page. This is an attempt at one.
 
-## How it's being built
+## Clean-room build
 
-The format is being worked out from the bytes of real ECW files, the same way you'd reverse-engineer any undocumented binary. Each decoded output is checked against GDAL's output for the same window, using GDAL purely as a black box.
+This library was written under clean-room rules. The format was worked out from the outside, the same way you'd reverse-engineer any undocumented binary.
 
-No ECW SDK source code (libecw or Hexagon) is read, copied or translated. What's been worked out is written up as a plain-English format spec in [`docs/ECW_FORMAT_SPEC.md`](docs/ECW_FORMAT_SPEC.md).
+The rules followed:
+
+- **No SDK source.** No ECW SDK source code (libecw, Hexagon or ERDAS) was read, copied, translated or used as a reference.
+- **File bytes only.** The layout was worked out by reading the bytes of real ECW files.
+- **Black-box comparison.** Decoded output was checked against GDAL's output for the same window, with GDAL and the ECW SDK used purely as a black box: files in, pixels out.
+- **Constructed test files.** Where no real file was available, small ECW files were written with chosen values and the SDK was asked to decode them. Nothing inside the SDK was inspected.
+- **Public documentation only.** GDAL's published ECW driver documentation was consulted. No confidential material was used.
+- **No SDK code shipped or linked.** ecw-js is plain JavaScript with no dependencies. It doesn't call, bundle or need the ECW SDK, and no encoder licence was bypassed.
+- **Private data stays private.** The sample files used for testing aren't published, and nothing in this repository is derived from their content.
+
+Everything worked out this way is written up as a plain-English format spec in [`docs/ECW_FORMAT_SPEC.md`](docs/ECW_FORMAT_SPEC.md), along with what is still unknown.
 
 ## Reading the header
 
