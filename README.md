@@ -2,7 +2,10 @@
 
 A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, published on npm as `ecw-js`. Plain ES modules, no dependencies, runs in the browser and in Node.
 
-**Status: work in progress.** Nothing is published to npm yet and the API below may change. Header and georeferencing reading comes first; pixel decoding follows once the block format is worked out.
+**Status: work in progress.** Nothing is published to npm yet and the API may change.
+
+- Working: `openEcw` reads the header, georeferencing and resolution levels.
+- Not yet: pixel decoding. `readRegion` rejects with `NOT_IMPLEMENTED` until the block format is worked out.
 
 ## Why
 
@@ -14,7 +17,24 @@ The format is being worked out from the bytes of real ECW files, the same way yo
 
 No ECW SDK source code (libecw or Hexagon) is read, copied or translated. The findings are written up as a plain-English format spec in `docs/` as they're confirmed.
 
-## Planned API
+## Reading the header
+
+```js
+import { openEcw } from "ecw-js";
+
+var ecw = await openEcw(file); // a File or Blob; only the first 8 KB is read
+
+ecw.info;
+// { version, width, height, bands, blockWidth, blockHeight, compressionTarget,
+//   levels: [{ width, height }, ...],  // coarsest first, full resolution last
+//   cellSizeX, cellSizeY, originX, originY, datum, projection, units }
+```
+
+`originX` / `originY` is the top-left corner. `cellSizeY` is negative for north-up images. Georeferencing values are returned exactly as stored, so a value can sit one unit in the last place away from the tidied number GDAL shows.
+
+`pixelWindowToBounds(ecw.info, x, y, width, height)` turns a pixel window into map-coordinate bounds.
+
+## Planned pixel API
 
 ```js
 import { openEcw } from "ecw-js";
@@ -37,6 +57,21 @@ ecw.close();
 ```
 
 Big outputs go to a scratch file in the browser's Origin Private File System (OPFS) rather than memory, and decoded blocks are cached there too.
+
+## Errors
+
+Everything throws or rejects with an `EcwError`. Branch on `error.code`; `error.offset` is the byte offset where the problem was found, when there is one.
+
+| Code | Meaning |
+|---|---|
+| `NOT_ECW` | Not an ECW file (wrong signature, or zero width, height or bands) |
+| `UNSUPPORTED_VERSION` | An ECW version other than 2 |
+| `TRUNCATED` | The file ends before the data it describes |
+| `BAD_LEVEL_TABLE` | The resolution-level table is inconsistent |
+| `INVALID_ARGUMENT` | A bad argument, such as a non-Blob or a reversed range |
+| `OUTPUT_TOO_LARGE` | A region read would exceed the in-memory limit |
+| `ABORTED` | The read was cancelled with an `AbortSignal` |
+| `NOT_IMPLEMENTED` | Pixel decoding is not available yet |
 
 ## Scope
 
