@@ -26,7 +26,10 @@ import { synthesizeWindow, requiredCoefficientWindow } from "../codec/wavelet.js
 /**
  * @param {{header:object, levels:Array, index:object, grid:Array,
  *   fetchBlock:function(number): Promise<Uint8Array>, signal?:AbortSignal,
- *   onBlock?:function(number)}} o
+ *   onBlock?:function(number), tileCache?:object}} o
+ *   tileCache (BlockCache): { tileSize, get(j, tx, ty) -> Promise<tile|null>,
+ *   put(j, tx, ty, tile) -> Promise } holding reconstructed level tiles
+ *   { width, height, bands } at full precision.
  * @returns {object} decode context
  */
 export function createDecodeContext(o) {
@@ -38,6 +41,7 @@ export function createDecodeContext(o) {
 		fetchBlock: o.fetchBlock,
 		signal: o.signal,
 		onBlock: o.onBlock,
+		tileCache: o.tileCache || null,
 		blocks: new Map(),
 		fetched: 0
 	};
@@ -180,6 +184,16 @@ async function decodeLevel(ctx, j, x0, y0, x1, y1, requested) {
 		var ll = await readCoefficients(ctx, 0, ["LL"], x0, y0, x1, y1);
 		return { width: x1 - x0, height: y1 - y0, bands: ll.map(function (p) { return p.LL; }) };
 	}
+	var bands = ctx.tileCache
+		? await assembleTiles(ctx, j, size, x0, y0, x1, y1)
+		: await synthesizeLevel(ctx, j, x0, y0, x1, y1);
+	if (!requested) storeIntermediate(bands);
+	return { width: x1 - x0, height: y1 - y0, bands: bands };
+}
+
+// Window [x0, x1) x [y0, y1) of image level j >= 1 at full precision: fresh arrays per band
+async function synthesizeLevel(ctx, j, x0, y0, x1, y1) {
+	var h = ctx.header;
 	// Step 1) Coefficient window of record j-1 and the matching LL window of image level j-1
 	var record = j - 1;
 	var lv = ctx.levels[record];
@@ -196,8 +210,40 @@ async function decodeLevel(ctx, j, x0, y0, x1, y1, requested) {
 			subbandsAt: subbandsAtFor(ctx, record, b)
 		}, x0, y0, x1, y1));
 	}
-	if (!requested) storeIntermediate(bands);
-	return { width: x1 - x0, height: y1 - y0, bands: bands };
+	return bands;
+}
+
+// The same window built from cached tiles of image level j, floored to eighths;
+// missing tiles are synthesised whole, floored and stored. A pixel's value never
+// depends on the window it was computed in, so tiles assemble to exactly what
+// synthesizeLevel returns, floored. Eighths are all a level feeding the next one
+// uses, and all readRegion uses of the requested level (colour floors to integers).
+async function assembleTiles(ctx, j, size, x0, y0, x1, y1) {
+	var cache = ctx.tileCache, t = cache.tileSize, width = x1 - x0;
+	var bands = [];
+	for (var b = 0; b < ctx.header.bands; b++) bands.push(new Float32Array(width * (y1 - y0)));
+	for (var ty = Math.floor(y0 / t); ty <= Math.floor((y1 - 1) / t); ty++) {
+		for (var tx = Math.floor(x0 / t); tx <= Math.floor((x1 - 1) / t); tx++) {
+			var tx0 = tx * t, ty0 = ty * t;
+			var tile = await cache.get(j, tx, ty);
+			if (!tile) {
+				var tx1 = Math.min(size.width, tx0 + t), ty1 = Math.min(size.height, ty0 + t);
+				var fresh = await synthesizeLevel(ctx, j, tx0, ty0, tx1, ty1);
+				storeIntermediate(fresh);
+				tile = { width: tx1 - tx0, height: ty1 - ty0, bands: fresh };
+				await cache.put(j, tx, ty, tile);
+			}
+			var sx0 = Math.max(x0, tx0), sx1 = Math.min(x1, tx0 + tile.width);
+			var sy0 = Math.max(y0, ty0), sy1 = Math.min(y1, ty0 + tile.height);
+			for (var band = 0; band < bands.length; band++) {
+				var src = tile.bands[band], dst = bands[band];
+				for (var y = sy0; y < sy1; y++) {
+					dst.set(src.subarray((y - ty0) * tile.width + sx0 - tx0, (y - ty0) * tile.width + sx1 - tx0), (y - y0) * width + sx0 - x0);
+				}
+			}
+		}
+	}
+	return bands;
 }
 
 /**

@@ -21,6 +21,7 @@ import { yuvToRgba, greyToRgba } from "./codec/colour.js";
 import { applyTransparency } from "./post/applyTransparency.js";
 import { clipToPolygon } from "./post/clipToPolygon.js";
 import { openScratchSyncWriter, openScratchReader, removeScratchFile } from "./io/ScratchBinaryFile.js";
+import { BlockCache, fileFingerprint } from "./cache/BlockCache.js";
 
 // Fixed header (0x59) plus up to 255 level records (21 bytes each) fits in 8 KB
 var HEADER_READ_BYTES = 8192;
@@ -33,8 +34,9 @@ var DEFAULT_STRIP_BYTES = 64 * 1024 * 1024;
  * @param {object} header - parseHeader() result.
  * @param {Array} levels - parseLevels() result.
  * @param {Uint8Array} headerBytes - The header window, for the block index.
+ * @param {BlockCache|null} [cache] - Reconstructed-tile cache shared by every read.
  */
-export function EcwReader(blobSource, header, levels, headerBytes) {
+export function EcwReader(blobSource, header, levels, headerBytes, cache) {
 	this._blobSource = blobSource;
 	this._headerBytes = headerBytes;
 	this._index = null;
@@ -43,6 +45,7 @@ export function EcwReader(blobSource, header, levels, headerBytes) {
 	this._levels = levels;
 	this._closed = false;
 	this._scratchIds = [];
+	this._cache = cache || null;
 	/** Public description of the image; `levels` runs coarsest first and ends at full resolution. */
 	this.info = {
 		version: header.version,
@@ -133,7 +136,7 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	var blobSource = this._blobSource;
 	var index = this._index;
 	var ctx = createDecodeContext({
-		header: h, levels: this._levels, index: index, grid: this._grid, signal: o.signal,
+		header: h, levels: this._levels, index: index, grid: this._grid, signal: o.signal, tileCache: this._cache,
 		fetchBlock: async function (n) {
 			var w = blockEntryWindow(index, n);
 			var r = blockByteRange(index, n, await blobSource.read(w.start, w.end), blobSource.size);
@@ -142,8 +145,13 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	});
 	var total = countWindowBlocks(ctx, plan.level, lx0, ly0, lx1, ly1);
 	progress(0, "reading " + total + " blocks");
-	ctx.onBlock = function (done) { progress(done / total, "decoded " + done + " of " + total + " blocks"); };
+	// tile padding can fetch more blocks than counted, cache hits fewer
+	ctx.onBlock = function (done) { progress(Math.min(1, done / total), "decoded " + done + " blocks"); };
 	var win = await decodeWindow(ctx, plan.level, lx0, ly0, lx1, ly1);
+	// Eighths are all the colour step uses (it floors to integers) and what cached
+	// tiles hold, so flooring here keeps "average" identical with or without a cache
+	win.bands.forEach(function (band) { for (var i = 0; i < band.length; i++) band[i] = Math.floor(band[i] * 8) / 8; });
+	if (this._cache) await this._cache.flush();
 	var sampled = sampleWindow(win.bands, lx1 - lx0, ly1 - ly0, o, scale, lx0, ly0, outW, plan.outH, plan.resample, oy0, oy1);
 	var data = new Uint8ClampedArray(outW * (oy1 - oy0) * 4);
 	if (h.bands >= 3) yuvToRgba(sampled[0], sampled[1], sampled[2], data);
@@ -213,22 +221,42 @@ EcwReader.prototype._removeScratch = async function (id) {
 	await removeScratchFile(entry.id, entry.options);
 };
 
+/** Tile cache counters, or null when the reader was opened with cache: false. */
+EcwReader.prototype.cacheStats = function () {
+	return this._cache ? this._cache.stats() : null;
+};
+
 /** Release resources and delete this reader's scratch files. Safe to call more than once. */
 EcwReader.prototype.close = async function () {
 	this._closed = true;
+	this._cache = null;
 	while (this._scratchIds.length) await this._removeScratch(this._scratchIds[0].id);
 };
 
 /**
  * Open an ECW file and read its header, georeferencing and level table.
  * @param {Blob} blob - A File or Blob.
+ * @param {{cache?: false|{tileSize?:number, memoryBytes?:number,
+ *   opfs?:boolean|{root?:object, dir?:string, maxBytes?:number}}}} [options]
+ *   cache: reconstructed tiles are kept in memory (256 MB) by default; false turns
+ *   caching off; opfs also keeps them in OPFS (512 MB) for later sessions.
  * @returns {Promise<EcwReader>}
  */
-export async function openEcw(blob) {
+export async function openEcw(blob, options) {
+	var cacheOpts = options && options.cache;
+	if (cacheOpts !== undefined && cacheOpts !== false && (typeof cacheOpts !== "object" || cacheOpts === null)) {
+		throw invalid("cache must be false or an options object");
+	}
 	var blobSource = new BlobSource(blob);
 	var bytes = await blobSource.read(0, Math.min(HEADER_READ_BYTES, blobSource.size));
 	var source = new MemorySource(bytes);
 	var header = parseHeader(source);
 	var levels = parseLevels(source, header);
-	return new EcwReader(blobSource, header, levels, bytes);
+	var cache = null;
+	if (cacheOpts !== false) {
+		var c = cacheOpts || {};
+		cache = new BlockCache({ tileSize: c.tileSize, memoryBytes: c.memoryBytes, opfs: c.opfs,
+			fingerprint: c.opfs ? await fileFingerprint(blob) : undefined });
+	}
+	return new EcwReader(blobSource, header, levels, bytes, cache);
 }

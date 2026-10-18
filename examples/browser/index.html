@@ -94,7 +94,7 @@
 			</div>
 
 			<div class="tab-body hidden" id="tab-scratch">
-				<p class="muted">Browser storage (OPFS) used by ecw-js. Kept files reopen instantly after a reload; scratch files hold decoded output and are swept after 24 hours.</p>
+				<p class="muted">Browser storage (OPFS) used by ecw-js. Kept files reopen instantly after a reload; scratch files hold decoded output and are swept after 24 hours; the tile cache keeps reconstructed tiles so revisited views decode fast, even after a reload.</p>
 				<table class="kv" id="storageTable"></table>
 				<h3>Kept files</h3>
 				<div id="keptList" class="muted">None yet. Tick "Keep in browser" and open a file.</div>
@@ -103,6 +103,14 @@
 				<div class="row">
 					<button class="button" id="sweepButton">Sweep stale</button>
 					<button class="button" id="refreshScratch">Refresh</button>
+				</div>
+				<h3>Tile cache</h3>
+				<label class="toggle" title="openEcw(file, { cache: { opfs: true } }); applies when a file is opened">
+					<input type="checkbox" id="cacheToggle"> Cache tiles in browser storage (from the next open)
+				</label>
+				<div id="cacheList" class="muted">Empty.</div>
+				<div class="row">
+					<button class="button" id="clearCache">Clear tile cache</button>
 				</div>
 			</div>
 

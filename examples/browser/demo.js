@@ -6,7 +6,7 @@
 // writes the library call it made into "How it works".
 //==========================================================
 
-import { openEcw, pixelWindowToBounds, applyTransparency, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles } from "../../src/index.js";
+import { openEcw, pixelWindowToBounds, applyTransparency, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles, blockCacheUsage, clearBlockCache } from "../../src/index.js";
 import { blockSizeColor, sizeRange } from "./lib/colorScale.js";
 import { levelPictureBounds, KEPT_DIR } from "./lib/demoCore.js";
 import { Viewer } from "./viewer.js";
@@ -127,7 +127,7 @@ async function openFileInDemo(f, fromKept) {
 	setProgress(0, "opening");
 	try {
 		reader = await openEcw(f);
-		opened = await run("open", { file: f });
+		opened = await run("open", { file: f, opfsCache: $("cacheToggle").checked });
 	} catch (err) {
 		setError(err);
 		how("var ecw = await openEcw(file);", { error: err.code, message: err.message });
@@ -386,7 +386,7 @@ async function runRead() {
 		viewer.setPicture({ rgba: img.data.slice(), width: img.width, height: img.height, bounds: img.bounds, smooth: true });
 		imageMode = true;
 		setProgress(1, "decoded " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
-		how(code, { width: img.width, height: img.height, level: img.level, bounds: img.bounds });
+		how(code, { width: img.width, height: img.height, level: img.level, bounds: img.bounds, "ecw.cacheStats()": img.cache });
 	} catch (err) {
 		how(code, { error: err.code, message: err.message });
 		if (err.code !== "ABORTED") setError(err);
@@ -424,7 +424,12 @@ async function refreshScratch() {
 		$("keptList").classList.toggle("muted", !kept.length);
 		$("scratchList").innerHTML = fileTable(scratch, ["delete"]) || "None.";
 		$("scratchList").classList.toggle("muted", !scratch.length);
-		var rows = [["kept files", kept.length], ["scratch files", scratch.length]];
+		var caches = await blockCacheUsage();
+		$("cacheList").innerHTML = caches.length ? "<table class='grid-table file-list'><tr><th>file fingerprint</th><th>tiles</th><th>size</th></tr>" + caches.map(function (c) {
+			return "<tr><td>" + c.fingerprint + "</td><td>" + c.tiles + "</td><td>" + formatBytes(c.bytes) + "</td></tr>";
+		}).join("") + "</table>" : "Empty.";
+		$("cacheList").classList.toggle("muted", !caches.length);
+		var rows = [["kept files", kept.length], ["scratch files", scratch.length], ["cached tiles", caches.reduce(function (n, c) { return n + c.tiles; }, 0)]];
 		if (navigator.storage && navigator.storage.estimate) {
 			var est = await navigator.storage.estimate();
 			rows.push(["origin storage used", formatBytes(est.usage || 0)], ["quota", formatBytes(est.quota || 0)]);
@@ -486,6 +491,19 @@ $("sweepButton").addEventListener("click", async function () {
 	var removed = await sweepStaleScratchFiles();
 	how("await sweepStaleScratchFiles(); // files older than 24 h", { removed: removed });
 	refreshScratch();
+});
+$("clearCache").addEventListener("click", async function () {
+	try {
+		await clearBlockCache();
+		how("await clearBlockCache(); // every file's cached tiles");
+	} catch (err) {
+		setError(err);
+	}
+	refreshScratch();
+});
+try { $("cacheToggle").checked = localStorage.getItem("ecw-demo-cache") === "1"; } catch (err) { /* storage blocked */ }
+$("cacheToggle").addEventListener("change", function (e) {
+	try { localStorage.setItem("ecw-demo-cache", e.target.checked ? "1" : "0"); } catch (err) { /* storage blocked */ }
 });
 try { $("keepToggle").checked = localStorage.getItem("ecw-demo-keep") === "1"; } catch (err) { /* storage blocked */ }
 $("keepToggle").addEventListener("change", function (e) {

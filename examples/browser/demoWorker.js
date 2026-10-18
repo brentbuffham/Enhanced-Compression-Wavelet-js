@@ -22,7 +22,7 @@ function progressFor(id) {
 var handlers = {
 	open: async function (payload, onProgress) {
 		var opened = await openFile(payload.file, onProgress);
-		state = { file: payload.file, opened: opened, reader: await openEcw(payload.file) };
+		state = { file: payload.file, opened: opened, reader: await openEcw(payload.file, payload.opfsCache ? { cache: { opfs: true } } : undefined) };
 		return opened;
 	},
 	levelBlocks: function (payload, onProgress) {
@@ -33,7 +33,7 @@ var handlers = {
 	},
 	read: async function (payload, onProgress) {
 		var img = await state.reader.readRegion(Object.assign({}, payload, { onProgress: onProgress }));
-		return { data: img.data, width: img.width, height: img.height, level: img.level, bounds: img.bounds };
+		return { data: img.data, width: img.width, height: img.height, level: img.level, bounds: img.bounds, cache: state.reader.cacheStats() };
 	},
 	keep: function (payload, onProgress) {
 		return keepFile(state.file, payload.name, onProgress);

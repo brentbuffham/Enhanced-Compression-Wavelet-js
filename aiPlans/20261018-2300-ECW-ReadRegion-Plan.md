@@ -52,6 +52,14 @@ Plan 1 constraints apply (zero deps, `node --test`, test-first, style, no privat
 - Abort or error removes the scratch file and rejects. `close()` removes the reader's scratch files.
 - Tests: bytes equal `readRegion` for nearest, average, clip + transparency with several strips; abort removes the file; invalid args reject before any file is created; `close()` removes files.
 
+### Task 9: `BlockCache` (reconstructed tiles, memory + OPFS)
+- Profile first (sample, 2048² views): wavelet synthesis 67% of decode time, coefficient copies 11%, stream decoding ~3%, blob reads ~4%.
+- Ruling: the "decoded-block cache" caches reconstructed level tiles, not decoded streams — streams are ~3% of the cost; the spec's "cache keeps intermediate levels" is the part that pays. Cost if wrong: a stream cache could be added beside it.
+- Ruling: tiles are stored floored to eighths (Int16, value × 8; Float32 fallback). Intermediates already use eighths; the requested level only ever reaches floor() in the colour step and floor(floor8(v)) = floor(v), so nearest output is unchanged (sample parity still exact). readRegion floors its window to eighths always, so "average" is identical with or without a cache. Cost if wrong: one more 2-byte plane per band.
+- Ruling: 64-px tiles, 256 MB memory by default (64 MB thrashed on a 2048² view). Measured on the sample: first view +23%, ×2 zoom-in −22%, repeat −89%. The first-view cost is tile snapping pulling in an extra ring of blocks per level; faster synthesis would shrink it.
+- Ruling: OPFS writes go into ~8 MB pack files with an index footer, flushed at the end of each read; one file per tile cost 23.8 s for a thumbnail (4,440 files) in Chrome. Whole packs are read back once and kept (4) for later tiles. Chrome: thumbnail 3.2 s uncached, 3.4 s while writing packs, 363 ms reopened after a reload.
+- OPFS tier opt-in (`cache: { opfs: true }`), keyed by fileFingerprint (name, size, lastModified, first 4 KB, CACHE_VERSION); failures are misses, never errors.
+
 ### Task 8: Worker entry `ecw-js/worker`
 - `src/workers/ecwDecodeWorker.js`: message protocol `{ id, type: "open" | "readRegion" | "readRegionToScratch" | "close", payload }` in; `{ id, type: "progress" | "result" | "error" }` out; pixel buffers transferred. Protocol logic lives in a pure `createWorkerHandler(post)` so Node tests drive it without a Worker.
 - `package.json` exports `./worker`.

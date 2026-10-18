@@ -23,3 +23,4 @@ export { SCRATCH_DIR, openScratchSyncWriter, openScratchReader, removeScratchFil
 export { decodeStream } from "./codec/streams.js";
 export { synthesizeWindow } from "./codec/wavelet.js";
 export { yuvToRgba } from "./codec/colour.js";
+export { BlockCache, CACHE_DIR, fileFingerprint, blockCacheUsage, clearBlockCache } from "./cache/BlockCache.js";

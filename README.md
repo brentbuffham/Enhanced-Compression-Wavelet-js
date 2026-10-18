@@ -79,6 +79,25 @@ reader.close();
 
 The bytes are exactly what `readRegion` would have returned. Scratch files are removed by `ecw.close()`; call `sweepStaleScratchFiles()` at startup to clear any left behind by a crashed tab (older than 24 hours by default).
 
+## Caching
+
+Wavelet synthesis is most of the decode time, so a reader keeps the reconstructed tiles of every level it builds and reuses them. A repeated view or a pan comes back several times faster, and zooming in reuses the coarser level it already built.
+
+```js
+import { openEcw, blockCacheUsage, clearBlockCache } from "ecw-js";
+
+var ecw = await openEcw(file);                                   // memory cache, 256 MB (default)
+var ecw = await openEcw(file, { cache: { opfs: true } });        // also keep tiles in OPFS for later visits
+var ecw = await openEcw(file, { cache: { memoryBytes: 64 * 1024 * 1024, opfs: { maxBytes: 1024 * 1024 * 1024 } } });
+var ecw = await openEcw(file, { cache: false });                 // no caching
+
+ecw.cacheStats();          // { memoryTiles, memoryBytes, hits, misses, opfsHits }
+await blockCacheUsage();   // [{ fingerprint, tiles, bytes }] per file in OPFS
+await clearBlockCache();   // delete every cached tile
+```
+
+The OPFS tier is keyed by a fingerprint of the file (name, size, date, first 4 KB) and the decoder version, so an edited file or a newer ecw-js never reuses stale tiles. Tiles are written in packs of about 8 MB and the oldest packs go first once `maxBytes` (512 MB by default) is reached. Output is byte for byte the same with or without a cache.
+
 ## In a Worker
 
 Decoding big regions takes a while, so keep it off the main thread. `ecw-js/worker` is a module Worker that speaks a small message protocol: send `{ id, type, payload }`, get back `progress` messages and then one `result` or `error` with the same `id`.

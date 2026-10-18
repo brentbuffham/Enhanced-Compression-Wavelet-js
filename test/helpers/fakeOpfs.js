@@ -62,14 +62,15 @@ function createFileEntry(name) {
  * @returns {object} directory handle with getDirectoryHandle, getFileHandle,
  *   removeEntry, values(), plus test hooks setLastModified(name, ms) and fileBytes(name).
  */
-export function createFakeRoot() {
+export function createFakeRoot(name) {
 	var entries = new Map();
 	var dir = {
 		kind: "directory",
+		name: name || "",
 		getDirectoryHandle: async function (name, opts) {
 			if (!entries.has(name)) {
 				if (!(opts && opts.create)) throw notFound(name);
-				entries.set(name, { kind: "directory", handle: createFakeRoot() });
+				entries.set(name, { kind: "directory", handle: createFakeRoot(name) });
 			}
 			return entries.get(name).handle;
 		},

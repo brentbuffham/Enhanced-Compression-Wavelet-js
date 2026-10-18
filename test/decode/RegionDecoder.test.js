@@ -23,6 +23,7 @@ function contextFor(bytes, opts) {
 	var ctx = createDecodeContext({
 		header: header, levels: levels, index: index, grid: blockGrid(header, levels),
 		signal: opts && opts.signal,
+		tileCache: opts && opts.tileCache,
 		fetchBlock: async function (n) {
 			fetches++;
 			var w = blockEntryWindow(index, n);
@@ -203,4 +204,45 @@ test("intermediate levels are stored at eighths; the requested level is not", as
 	var refTop = reference(0, 3), refMid = reference(0, 2);
 	for (var y = 0; y < 64; y++) for (var x = 0; x < 64; x++) assert.equal(top.bands[0][y * 64 + x], refTop.data[y * refTop.stride + x], "level 3 at " + x + "," + y);
 	for (y = 0; y < 32; y++) for (x = 0; x < 32; x++) assert.equal(mid.bands[0][y * 32 + x], refMid.data[y * refMid.stride + x], "level 2 at " + x + "," + y);
+});
+
+// Minimal tile cache: the interface decodeWindow expects from BlockCache
+function mapCache(tileSize) {
+	var m = new Map();
+	return {
+		tileSize: tileSize,
+		get: async function (j, tx, ty) { return m.get(j + "/" + tx + "/" + ty) || null; },
+		put: async function (j, tx, ty, tile) { m.set(j + "/" + tx + "/" + ty, tile); },
+		keys: function () { return Array.from(m.keys()); }
+	};
+}
+
+function eighths(a) { return Array.from(a, function (v) { return Math.floor(v * 8) / 8; }); }
+
+test("a tile cache gives the same windows floored to eighths, at every level", async function () {
+	var o = { width: 61, height: 45, levelCount: 4, coeff: hash };
+	var bytes = buildCodedFile(o).bytes;
+	var cache = mapCache(8);
+	var windows = [[4, 0, 0, 61, 45], [4, 13, 7, 40, 31], [3, 5, 9, 29, 23], [2, 0, 3, 11, 12], [1, 2, 1, 7, 6], [4, 30, 20, 61, 45]];
+	for (var w of windows) {
+		var plain = await decodeWindow(contextFor(bytes).ctx, w[0], w[1], w[2], w[3], w[4]);
+		var cached = await decodeWindow(contextFor(bytes, { tileCache: cache }).ctx, w[0], w[1], w[2], w[3], w[4]);
+		// tiles are stored at eighths (all readRegion uses of the requested level; exactly what intermediates use)
+		for (var b = 0; b < 3; b++) assert.deepEqual(Array.from(cached.bands[b]), eighths(plain.bands[b]), "window " + w + " band " + b);
+	}
+	// intermediate levels were cached too, never level 0
+	var levelsSeen = new Set(cache.keys().map(function (k) { return Number(k.split("/")[0]); }));
+	assert.deepEqual(Array.from(levelsSeen).sort(), [1, 2, 3, 4]);
+});
+
+test("a repeat window served from the tile cache fetches no blocks", async function () {
+	var bytes = buildCodedFile({ width: 61, height: 45, levelCount: 4, coeff: hash }).bytes;
+	var cache = mapCache(16);
+	var first = contextFor(bytes, { tileCache: cache });
+	var a = await decodeWindow(first.ctx, 4, 10, 10, 50, 40);
+	assert.ok(first.fetches() > 0);
+	var second = contextFor(bytes, { tileCache: cache });
+	var b = await decodeWindow(second.ctx, 4, 10, 10, 50, 40);
+	assert.equal(second.fetches(), 0);
+	assert.deepEqual(Array.from(b.bands[0]), Array.from(a.bands[0]));
 });
