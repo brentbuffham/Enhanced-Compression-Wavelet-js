@@ -1,0 +1,126 @@
+// test/decode/RegionDecoder.test.js
+//==========================================================
+// Windowed multi-level reconstruction over synthetic coded files.
+// Run with: node --test test/decode/RegionDecoder.test.js
+//==========================================================
+/* prettier-ignore-file */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { decodeWindow, imageLevelSize, createDecodeContext } from "../../src/decode/RegionDecoder.js";
+import { synthesizeWindow } from "../../src/codec/wavelet.js";
+import { parseHeader } from "../../src/format/EcwHeader.js";
+import { parseLevels } from "../../src/format/EcwLevels.js";
+import { parseBlockIndex, blockGrid, blockEntryWindow, blockByteRange } from "../../src/format/EcwBlockIndex.js";
+import { MemorySource } from "../../src/io/MemorySource.js";
+import { buildCodedFile } from "../helpers/buildCodedFile.js";
+
+function contextFor(bytes, opts) {
+	var source = new MemorySource(bytes);
+	var header = parseHeader(source);
+	var levels = parseLevels(source, header);
+	var index = parseBlockIndex(source, header);
+	var fetches = 0;
+	var ctx = createDecodeContext({
+		header: header, levels: levels, index: index, grid: blockGrid(header, levels),
+		signal: opts && opts.signal,
+		fetchBlock: async function (n) {
+			fetches++;
+			var w = blockEntryWindow(index, n);
+			var r = blockByteRange(index, n, bytes.subarray(w.start, w.end), bytes.length);
+			return bytes.subarray(r.start, r.end);
+		}
+	});
+	return { ctx: ctx, header: header, levels: levels, fetches: function () { return fetches; } };
+}
+
+function hash(r, b, sb, x, y) {
+	var v = (r * 7919 + b * 104729 + sb.charCodeAt(0) * 31 + sb.charCodeAt(1) * 17 + x * 131 + y * 977) % 23;
+	return sb === "LL" ? 40 + v : v - 11;
+}
+
+// Reference: full planes straight from the coefficient function, synthesised level by level
+function naive(o, levels, band) {
+	var img = null, w = 0, h = 0;
+	levels.forEach(function (lv, r) {
+		var p = { w: lv.width, h: lv.height, x0: 0, y0: 0, width: lv.width, height: lv.height };
+		["LL", "LH", "HL", "HH"].forEach(function (sb) {
+			p[sb] = new Float32Array(lv.width * lv.height);
+			for (var y = 0; y < lv.height; y++) for (var x = 0; x < lv.width; x++) {
+				p[sb][y * lv.width + x] = sb === "LL" ? (r === 0 ? o.coeff(0, band, "LL", x, y) : img[y * (2 * w) + x]) : o.coeff(r, band, sb, x, y);
+			}
+		});
+		img = synthesizeWindow(p, 0, 0, 2 * lv.width, 2 * lv.height);
+		w = lv.width; h = lv.height;
+	});
+	return { data: img, stride: 2 * w };
+}
+
+test("imageLevelSize: records then full resolution", function () {
+	var f = contextFor(buildCodedFile({ width: 30, height: 20, levelCount: 2, coeff: function () { return 0; } }).bytes);
+	assert.deepEqual(imageLevelSize(f.header, f.levels, 0), { width: 8, height: 5 });
+	assert.deepEqual(imageLevelSize(f.header, f.levels, 1), { width: 15, height: 10 });
+	assert.deepEqual(imageLevelSize(f.header, f.levels, 2), { width: 30, height: 20 });
+});
+
+test("constant LL with zero details reconstructs a constant image", async function () {
+	var o = { width: 30, height: 20, levelCount: 2, coeff: function (r, b, sb) { return r === 0 && b === 0 && sb === "LL" ? 77 : 0; } };
+	var f = contextFor(buildCodedFile(o).bytes);
+	var win = await decodeWindow(f.ctx, 2, 0, 0, 30, 20);
+	assert.equal(win.width, 30);
+	assert.equal(win.height, 20);
+	assert.ok(win.bands[0].every(function (v) { return v === 77; }));
+	assert.ok(win.bands[1].every(function (v) { return v === 0; }));
+});
+
+test("full decode matches the plane-by-plane reference", async function () {
+	var o = { width: 30, height: 21, levelCount: 3, coeff: hash };
+	var built = buildCodedFile(o);
+	var f = contextFor(built.bytes);
+	var win = await decodeWindow(f.ctx, 3, 0, 0, 30, 21);
+	for (var b = 0; b < 3; b++) {
+		var ref = naive(o, built.levels, b);
+		for (var y = 0; y < 21; y++) for (var x = 0; x < 30; x++) assert.equal(win.bands[b][y * 30 + x], ref.data[y * ref.stride + x], "band " + b + " at " + x + "," + y);
+	}
+});
+
+test("a window equals the matching crop of the full decode, with fewer block reads", async function () {
+	var o = { width: 64, height: 48, levelCount: 3, coeff: hash };
+	var bytes = buildCodedFile(o).bytes;
+	var full = contextFor(bytes);
+	var whole = await decodeWindow(full.ctx, 3, 0, 0, 64, 48);
+	var part = contextFor(bytes);
+	var win = await decodeWindow(part.ctx, 3, 37, 9, 50, 20);
+	for (var b = 0; b < 3; b++) for (var y = 9; y < 20; y++) for (var x = 37; x < 50; x++) assert.equal(win.bands[b][(y - 9) * 13 + x - 37], whole.bands[b][y * 64 + x]);
+	assert.ok(part.fetches() < full.fetches(), part.fetches() + " < " + full.fetches());
+});
+
+test("coarser image levels decode directly", async function () {
+	var o = { width: 30, height: 21, levelCount: 3, coeff: hash };
+	var built = buildCodedFile(o);
+	var f = contextFor(built.bytes);
+	var lvl0 = await decodeWindow(f.ctx, 0, 0, 0, 4, 3);
+	assert.equal(lvl0.bands[0][0], hash(0, 0, "LL", 0, 0));
+	assert.equal(lvl0.bands[2][2 * 4 + 3], hash(0, 2, "LL", 3, 2));
+});
+
+test("each block is fetched once per context", async function () {
+	var f = contextFor(buildCodedFile({ width: 30, height: 21, levelCount: 3, coeff: hash }).bytes);
+	await decodeWindow(f.ctx, 3, 0, 0, 30, 21);
+	var first = f.fetches();
+	await decodeWindow(f.ctx, 3, 5, 5, 10, 10);
+	assert.equal(f.fetches(), first);
+});
+
+test("an aborted signal rejects with ABORTED", async function () {
+	var controller = new AbortController();
+	controller.abort();
+	var f = contextFor(buildCodedFile({ width: 30, height: 21, levelCount: 3, coeff: hash }).bytes, { signal: controller.signal });
+	await assert.rejects(decodeWindow(f.ctx, 3, 0, 0, 30, 21), { code: "ABORTED" });
+});
+
+test("a window outside the level throws INVALID_ARGUMENT", async function () {
+	var f = contextFor(buildCodedFile({ width: 30, height: 21, levelCount: 3, coeff: hash }).bytes);
+	await assert.rejects(decodeWindow(f.ctx, 3, 0, 0, 31, 21), { code: "INVALID_ARGUMENT" });
+	await assert.rejects(decodeWindow(f.ctx, 3, 5, 5, 5, 9), { code: "INVALID_ARGUMENT" });
+	await assert.rejects(decodeWindow(f.ctx, 4, 0, 0, 1, 1), { code: "INVALID_ARGUMENT" });
+});
