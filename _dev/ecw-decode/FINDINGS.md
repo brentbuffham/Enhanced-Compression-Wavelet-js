@@ -79,19 +79,26 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Self-delimiting: the decoded value count equals the block's extent in its level (`min(64, levelW - col*64) × min(64, levelH - row*64)`), and the stream ends exactly on its last word. Checked on all 2,055 mode-6 streams in 6,000 sampled blocks: 2,055 exact, 0 mismatches.
 - Example (59×1 edge block, band 0 first stream): `8020 0001 4005` then 25 literals → 32 zeros, +1, −5, then image-like values 31…121.
 
-## Partly cracked: mode 2 streams
+## ⭐ CRACKED: mode 2 streams (Huffman-coded run-length symbols)
 
-- Payload: u32 LE `N`, then an `N`-byte table, then a high-entropy bitstream (mostly 1-bits on sparse blocks: a dominant short code).
-- Table tokens are byte-aligned. Three kinds seen across 400 tables:
-  - `0x00` (most common)
-  - `0x80` followed by a u16 LE mode-6 word (all three tags seen: + value, − value, zero run). Example `80 21 80` = 0x8021 = 33 zeros in the 59×1 block, matching its mode-6 neighbours.
-  - single bytes `0x41–0x4F`, `0x51–0x5F`, `0x61–0x6F` (low nibble 0 never appears): three kinds × values 1–15, likely compact forms of the three mode-6 tags.
-- With that tokenisation 264 of 400 tables end exactly at `N`; the rest overrun by one byte (all large level-0 tables so far). Something in the tokenisation or the meaning of `N` is still off.
-- Ruled out: bit-packed pre-order tree (any bit order, leaf flag, 8/16-bit symbols); byte pre-order tree with `00` as internal node (closes after a few tokens).
+- Payload after the mode byte:
+  1. u16 LE `N`: number of nodes in the Huffman tree.
+  2. `N` tree tokens in pre-order (node, left subtree, right subtree):
+     - `0x00`: internal node
+     - `0x80` + u16 LE word: leaf holding a mode-6 word (`00` +m, `01` −m, `10` m zeros)
+     - `0x4v`: leaf `+v` (v = 1–15)
+     - `0x5v`: leaf `−v`
+     - `0x6v`: leaf `v` zeros
+     (the same tag order as mode 6, squeezed into one byte for magnitudes up to 15)
+  3. The coded bits, read **LSB-first** within each byte; bit `0` = left branch, `1` = right.
+- Decode symbols until the block extent's value count is reached. It always lands exactly on a symbol boundary.
+- The encoder writes one extra byte after the last code: 8–15 bits are always left over.
+- Checked on 6,000 mode-2 streams from 20,000 sampled blocks (all levels, all subbands): tree closes at exactly `N` nodes in 1,500/1,500, and 6,000/6,000 decode to exactly the extent with 8–15 bits left.
+- Example (9 nodes): tree `. +1 . z62 . . z3585 z319 −1`, data `2b ef 32 00` → `z319 +1 z62 +1 0 z62 0 +1 z62 +1 z3585`: a short vertical line of coefficients at columns 62–63, rows 4–7.
+- Ruled out on the way: u32 table length (the first two `00` after `N` are tree nodes); bit-packed trees; reading short tokens as all-values or `5v` as runs.
 
 ## Open (for the codec plan)
 
-- What modes `2` and `6` are (likely candidates: run-length plus Huffman, or an adaptive arithmetic coder). Bytes after the tag start e.g. `27 01 00 …` and `20 80 01 …`.
 - Meaning of level-record `a/b/c`, header bytes `0x02–0x03`, `0x05`, `0x10`, and the index flag byte.
 - Quantisation (header compression target is 8), wavelet filter, and colour transform.
 
