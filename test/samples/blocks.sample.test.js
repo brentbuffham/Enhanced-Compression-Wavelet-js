@@ -1,6 +1,6 @@
 // test/samples/blocks.sample.test.js
 //==========================================================
-// Block index and framing on the private sample: the index
+// Block index and framing on each private sample: the index
 // matches the level grid, the end marker lands on the file size,
 // and 2,000 evenly spaced blocks frame cleanly with known modes.
 // Skips without samples. Run with: node --test test/samples/blocks.sample.test.js
@@ -14,10 +14,9 @@ import { parseLevels } from "../../src/format/EcwLevels.js";
 import { parseBlockIndex, blockGrid, checkBlockIndex, totalBlocks, blockEntryWindow, blockByteRange } from "../../src/format/EcwBlockIndex.js";
 import { splitBlockStreams } from "../../src/format/EcwBlockFrame.js";
 import { MemorySource } from "../../src/io/MemorySource.js";
-import { findSample, readRange } from "../helpers/samples.js";
+import { forEachSample, readRange } from "../helpers/samples.js";
 
-var sample = findSample();
-var skip = sample ? false : "no samples/*.ecw with samples/ref/gdalinfo.json";
+forEachSample(function (sample, label, skip) {
 
 function load() {
 	var source = new MemorySource(readRange(sample.ecwPath, 0, 8192));
@@ -26,7 +25,7 @@ function load() {
 	return { header: header, index: parseBlockIndex(source, header), grid: blockGrid(header, levels), size: statSync(sample.ecwPath).size };
 }
 
-test("block index matches the level grid and ends at the file size", { skip: skip }, function () {
+test("block index matches the level grid and ends at the file size" + label, { skip: skip }, function () {
 	var f = load();
 	checkBlockIndex(f.index, f.grid);
 	var last = totalBlocks(f.grid) - 1;
@@ -35,7 +34,7 @@ test("block index matches the level grid and ends at the file size", { skip: ski
 	assert.equal(r.end, f.size);
 });
 
-test("2,000 evenly spaced blocks frame cleanly with modes 2, 5 or 6", { skip: skip }, function () {
+test("2,000 evenly spaced blocks frame cleanly with modes 2, 5 or 6" + label, { skip: skip }, function () {
 	var f = load();
 	var total = totalBlocks(f.grid);
 	var modes = {};
@@ -48,4 +47,6 @@ test("2,000 evenly spaced blocks frame cleanly with modes 2, 5 or 6", { skip: sk
 		streams.forEach(function (s) { modes[s.mode] = (modes[s.mode] || 0) + 1; });
 	}
 	assert.deepEqual(Object.keys(modes).map(Number).sort(), [2, 5, 6]);
+});
+
 });

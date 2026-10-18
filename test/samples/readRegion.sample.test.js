@@ -1,6 +1,6 @@
 // test/samples/readRegion.sample.test.js
 //==========================================================
-// readRegion against the GDAL reference set on the private sample.
+// readRegion against the GDAL reference set of each private sample.
 // Current state (FINDINGS.md): every pixel matches the SDK bit for bit.
 // Guard: exact equality.
 // Level-0 reference is skipped: GDAL's coarsest overview is the level-1
@@ -14,12 +14,9 @@ import { readFileSync, existsSync, openAsBlob } from "node:fs";
 import { join } from "node:path";
 import { openEcw } from "../../src/EcwReader.js";
 import { readTiff } from "../helpers/readTiff.js";
-import { findSample } from "../helpers/samples.js";
+import { forEachSample } from "../helpers/samples.js";
 import { createFakeRoot } from "../helpers/fakeOpfs.js";
 
-var sample = findSample();
-var manifestPath = sample && join(sample.refDir, "manifest.json");
-var skip = sample && existsSync(manifestPath) ? false : "no samples/ref/manifest.json";
 var MAX_ERROR = 0;
 var MIN_EXACT = 1;
 
@@ -36,7 +33,11 @@ function compare(img, ref) {
 	return { exact: exact / n, max: max };
 }
 
-test("readRegion matches GDAL references exactly", { skip: skip, timeout: 120000 }, async function () {
+forEachSample(function (sample, label, noSample) {
+var manifestPath = sample && join(sample.refDir, "manifest.json");
+var skip = noSample || (existsSync(manifestPath) ? false : "no ref/manifest.json");
+
+test("readRegion matches GDAL references exactly" + label, { skip: skip, timeout: 300000 }, async function () {
 	var ecw = await openEcw(await openAsBlob(sample.ecwPath));
 	var manifest = JSON.parse(readFileSync(manifestPath, "utf8")).filter(function (m) { return m.name !== "level-0.tif"; });
 	for (var m of manifest) {
@@ -49,7 +50,7 @@ test("readRegion matches GDAL references exactly", { skip: skip, timeout: 120000
 	}
 });
 
-test("readRegionToScratch strips equal the GDAL references", { skip: skip, timeout: 120000 }, async function () {
+test("readRegionToScratch strips equal the GDAL references" + label, { skip: skip, timeout: 300000 }, async function () {
 	var ecw = await openEcw(await openAsBlob(sample.ecwPath));
 	var manifest = JSON.parse(readFileSync(manifestPath, "utf8")).filter(function (m) { return /^crop-/.test(m.name); });
 	for (var m of manifest) {
@@ -64,4 +65,6 @@ test("readRegionToScratch strips equal the GDAL references", { skip: skip, timeo
 		assert.ok(r.max === 0 && r.exact === 1, m.name + ": max error " + r.max);
 	}
 	await ecw.close();
+});
+
 });

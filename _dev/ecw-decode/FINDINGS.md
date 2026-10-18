@@ -147,6 +147,7 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - How rule 3 was found: `cornerBisect.mjs` re-crafts Sample A's first four records as a small file, which the SDK decodes identically to the real overview. That file kept our last 12 level-4 mismatches. Zeroing coefficients narrowed them to two: an HH in one block and an HL just across the block row below, both chroma. A synthetic file with constant LL and just those two coefficients reproduced it: the SDK's pixels on each side of the edge used only the subband present in their own block.
 - Steps on the way: "all three empty → exact" (168 left), then "the exact path ignores neighbours' details too" (77 left), then the per-subband rule (0 left).
 - Sample A: 0 differing pixels of 11,157,750 across levels 1–5 and the full-resolution crops. The sample test now demands exact equality.
+- Sample B (a second private file from a different encoding run: higher compression target, dequantisation steps that are not powers of two): 0 differing pixels of 15,631,387 on its first run, with no decoder changes.
 - Ruled out on the way: next / both / either block rules; per-block (all bands) emptiness; eighth storage on one path only; truncating instead of flooring the eighths (31,890 mismatches).
 
 ## History (resolved): what was left at deeper levels
