@@ -36,9 +36,8 @@ test("openEcw with a non-Blob rejects INVALID_ARGUMENT", async function () {
 	await assert.rejects(openEcw("file.ecw"), { code: "INVALID_ARGUMENT" });
 });
 
-test("readRegion rejects NOT_IMPLEMENTED; close is idempotent", async function () {
+test("readRegionToScratch rejects NOT_IMPLEMENTED; close is idempotent", async function () {
 	var r = await openEcw(new Blob([buildEcwHeader({})]));
-	await assert.rejects(r.readRegion({ x: 0, y: 0, width: 1, height: 1 }), { code: "NOT_IMPLEMENTED" });
 	await assert.rejects(r.readRegionToScratch({ x: 0, y: 0, width: 1, height: 1 }), { code: "NOT_IMPLEMENTED" });
 	r.close();
 	r.close();
@@ -47,7 +46,8 @@ test("readRegion rejects NOT_IMPLEMENTED; close is idempotent", async function (
 test("public exports", async function () {
 	var mod = await import("../src/index.js");
 	assert.deepEqual(Object.keys(mod).sort(), ["BlobSource", "ERROR_CODES", "EcwError", "MemorySource", "SCRATCH_DIR", "STREAM_MODE", "VERSION",
-		"applyTransparency", "blockByteRange", "blockEntryWindow", "blockGrid", "clipToPolygon", "getScratchFile", "levelEntryWindow", "listScratchFiles", "openEcw",
+		"applyTransparency", "blockByteRange", "blockEntryWindow", "blockGrid", "clipToPolygon", "decodeStream", "getScratchFile", "levelEntryWindow", "listScratchFiles", "openEcw",
 		"openScratchReader", "openScratchSyncWriter",
-		"parseBlockIndex", "parseHeader", "parseLevels", "pixelWindowToBounds", "removeScratchFile", "splitBlockStreams", "sweepStaleScratchFiles"]);
+		"parseBlockIndex", "parseHeader", "parseLevels", "pixelWindowToBounds", "removeScratchFile", "splitBlockStreams", "sweepStaleScratchFiles",
+		"synthesizeWindow", "yuvToRgba"]);
 });

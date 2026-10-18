@@ -112,7 +112,16 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Coefficients are used as decoded: no dequantisation scale (detail scale 1.0 beats 0.8–1.05), no mid-bin offset.
 - Band 0 is luma, bands 1 and 2 chroma (Cb-like, Cr-like). A free 3×4 fit on 52,000 level-2 pixels gives `R = Y + 1.4017·Cr`, `G = Y − 0.3537·Cb − 0.7082·Cr`, `B = Y + 1.7705·Cb`: BT.601 YCbCr, luma gain 1.000.
 - GDAL's level-k output is our reconstruction at level k. Its coarsest overview (record 0's size) is the record-1 reconstruction sampled at even pixels.
-- Accuracy with float synthesis and BT.601 + rounding: level 1 47% exact, 99.9% within ±1; level 2 46% exact within ±2; level 5 (8 M pixels) max error 3, mean 0.6. Level 5 rebuilds in 1.8 s in Node.
+- Accuracy with float synthesis and BT.601 + rounding (+0.5 on R and B, quantisation steps applied): levels 1–5 are 78–70% exact, max error 2–3; full resolution 24% exact, max error 4, mean 1.1. Level 5 rebuilds in 1.8 s in Node; `readRegion` runs the whole reference set in about 3 s.
+
+## ⭐ CRACKED: quantisation steps (level-record a / b / c)
+
+- The three u32 values in each level record are per-band dequantisation steps for that record's detail subbands: `a` for band 0 (luma), `b` for band 1, `c` for band 2. LL is used as decoded (record 0 has a = b = c = 1 on Sample A, so an LL step cannot be confirmed yet).
+- Evidence: Sample A's steps are 1 for the coarse records, then a = 2, 4, 8 and b = c = 3, 6, 12, 24 at the finest records. Applying them at full resolution cuts the worst error against GDAL from 19 to 4 and the mean from 7.8 to 1.1 (512×512 crop inside the imagery). Applying `a` to all bands leaves chroma errors up to 19.
+
+## Note on the reference set
+
+- The original centre crops fell in the black notch of the footprint and matched trivially. `makeRefs.mjs` now places the aligned and straddle crops inside the imagery (nearest solid point to the imagery centroid on the finest level reference).
 
 ## Open: the last ±1
 

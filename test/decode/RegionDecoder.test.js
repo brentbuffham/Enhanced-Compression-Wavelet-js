@@ -6,7 +6,7 @@
 /* prettier-ignore-file */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decodeWindow, imageLevelSize, createDecodeContext } from "../../src/decode/RegionDecoder.js";
+import { decodeWindow, imageLevelSize, createDecodeContext, countWindowBlocks } from "../../src/decode/RegionDecoder.js";
 import { synthesizeWindow } from "../../src/codec/wavelet.js";
 import { parseHeader } from "../../src/format/EcwHeader.js";
 import { parseLevels } from "../../src/format/EcwLevels.js";
@@ -123,4 +123,29 @@ test("a window outside the level throws INVALID_ARGUMENT", async function () {
 	await assert.rejects(decodeWindow(f.ctx, 3, 0, 0, 31, 21), { code: "INVALID_ARGUMENT" });
 	await assert.rejects(decodeWindow(f.ctx, 3, 5, 5, 5, 9), { code: "INVALID_ARGUMENT" });
 	await assert.rejects(decodeWindow(f.ctx, 4, 0, 0, 1, 1), { code: "INVALID_ARGUMENT" });
+});
+
+test("countWindowBlocks predicts exactly the blocks a decode fetches", async function () {
+	var bytes = buildCodedFile({ width: 64, height: 48, levelCount: 3, coeff: hash }).bytes;
+	for (var w of [[0, 0, 64, 48], [37, 9, 50, 20], [0, 0, 1, 1]]) {
+		var f = contextFor(bytes);
+		var predicted = countWindowBlocks(f.ctx, 3, w[0], w[1], w[2], w[3]);
+		await decodeWindow(f.ctx, 3, w[0], w[1], w[2], w[3]);
+		assert.equal(predicted, f.fetches(), JSON.stringify(w));
+	}
+});
+
+test("detail coefficients are scaled by the record's a / b / c steps per band", async function () {
+	var coeff = function (r, b, sb, x, y) { return r === 0 && sb === "LL" ? 50 : (r === 1 && sb === "HL" && x === 2 && y === 1 ? 3 : 0); };
+	var steps = function (r) { return r === 1 ? { a: 4, b: 2, c: 8 } : { a: 1, b: 1, c: 1 }; };
+	var plain = buildCodedFile({ width: 32, height: 24, levelCount: 2, coeff: coeff });
+	var scaled = buildCodedFile({ width: 32, height: 24, levelCount: 2, coeff: coeff, steps: steps });
+	var ref = await decodeWindow(contextFor(plain.bytes).ctx, 2, 0, 0, 32, 24);
+	var got = await decodeWindow(contextFor(scaled.bytes).ctx, 2, 0, 0, 32, 24);
+	var bandStep = [4, 2, 8];
+	for (var b = 0; b < 3; b++) for (var i = 0; i < 32 * 24; i++) {
+		// LL is not scaled; only the detail contribution grows by the band's step
+		var expected = 50 + (ref.bands[b][i] - 50) * bandStep[b];
+		assert.equal(got.bands[b][i], expected, "band " + b + " pixel " + i);
+	}
 });

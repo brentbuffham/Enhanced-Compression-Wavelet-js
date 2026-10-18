@@ -9,11 +9,12 @@
 
 import { buildEcwFile } from "./buildEcwFile.js";
 
-function ceilLevels(width, height, count) {
+function ceilLevels(width, height, count, steps) {
 	var list = [];
 	for (var k = 0; k < count; k++) {
 		var s = Math.pow(2, count - k);
-		list.push({ level: k, width: Math.ceil(width / s), height: Math.ceil(height / s), a: 1, b: 1, c: 1 });
+		var st = steps ? steps(k) : { a: 1, b: 1, c: 1 };
+		list.push({ level: k, width: Math.ceil(width / s), height: Math.ceil(height / s), a: st.a, b: st.b, c: st.c });
 	}
 	return list;
 }
@@ -50,13 +51,15 @@ function frame(streams) {
 
 /**
  * @param {{width:number, height:number, levelCount:number, bands?:number, block?:number,
- *   coeff:function(number, number, string, number, number): number}} o
+ *   coeff:function(number, number, string, number, number): number,
+ *   steps?:function(number): {a:number, b:number, c:number}}} o
+ *   steps gives each level record's a/b/c (per-band quantisation steps).
  * @returns {{bytes: Uint8Array, levels: Array}}
  */
 export function buildCodedFile(o) {
 	var bands = o.bands || 3;
 	var block = o.block || 4;
-	var levels = ceilLevels(o.width, o.height, o.levelCount);
+	var levels = ceilLevels(o.width, o.height, o.levelCount, o.steps);
 	var blocks = [];
 	levels.forEach(function (lv, r) {
 		var subbands = r === 0 ? ["LL", "LH", "HL", "HH"] : ["LH", "HL", "HH"];

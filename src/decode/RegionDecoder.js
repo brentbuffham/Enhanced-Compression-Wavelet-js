@@ -8,6 +8,9 @@
 // of level j and the record-j blocks under it, so the recursion reads
 // a cone of blocks, never a whole level. Decoded blocks are cached on
 // the context, so each block is fetched and decoded once.
+// Detail coefficients are dequantised by the record's per-band step:
+// a (band 0), b (band 1), c (band 2) from the level table
+// (FINDINGS.md "quantisation steps"). LL is used as decoded.
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
@@ -111,6 +114,19 @@ async function readCoefficients(ctx, record, subbands, x0, y0, x1, y1) {
 	return out;
 }
 
+// Multiply detail planes in place by the record's per-band step
+function dequantise(details, record) {
+	var steps = [record.a, record.b, record.c];
+	details.forEach(function (planes, band) {
+		var step = steps[Math.min(band, 2)];
+		if (step === 1) return;
+		["LH", "HL", "HH"].forEach(function (sb) {
+			var a = planes[sb];
+			for (var i = 0; i < a.length; i++) a[i] *= step;
+		});
+	});
+}
+
 /**
  * Reconstruct window [x0, x1) x [y0, y1) of image level j.
  * @returns {Promise<{width:number, height:number, bands:Float32Array[]}>}
@@ -135,6 +151,7 @@ export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
 	var c = requiredCoefficientWindow(lv.width, lv.height, x0, y0, x1, y1);
 	var low = await decodeWindow(ctx, record, c.x0, c.y0, c.x1, c.y1);
 	var details = await readCoefficients(ctx, record, ["LH", "HL", "HH"], c.x0, c.y0, c.x1, c.y1);
+	dequantise(details, lv);
 	// Step 2) Synthesise each band
 	var bands = [];
 	for (var b = 0; b < h.bands; b++) {
@@ -144,4 +161,28 @@ export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
 		}, x0, y0, x1, y1));
 	}
 	return { width: x1 - x0, height: y1 - y0, bands: bands };
+}
+
+/**
+ * Number of distinct blocks decodeWindow(ctx, j, ...) will fetch (for progress).
+ * @returns {number}
+ */
+export function countWindowBlocks(ctx, j, x0, y0, x1, y1) {
+	var seen = new Set();
+	var h = ctx.header;
+	function addBlocks(record, cx0, cy0, cx1, cy1) {
+		var g = ctx.grid[record];
+		for (var row = Math.floor(cy0 / h.blockHeight); row <= Math.floor((cy1 - 1) / h.blockHeight); row++) {
+			for (var col = Math.floor(cx0 / h.blockWidth); col <= Math.floor((cx1 - 1) / h.blockWidth); col++) seen.add(g.firstBlock + row * g.cols + col);
+		}
+	}
+	function walk(level, wx0, wy0, wx1, wy1) {
+		if (level === 0) { addBlocks(0, wx0, wy0, wx1, wy1); return; }
+		var lv = ctx.levels[level - 1];
+		var c = requiredCoefficientWindow(lv.width, lv.height, wx0, wy0, wx1, wy1);
+		addBlocks(level - 1, c.x0, c.y0, c.x1, c.y1);
+		walk(level - 1, c.x0, c.y0, c.x1, c.y1);
+	}
+	walk(j, x0, y0, x1, y1);
+	return seen.size;
 }
