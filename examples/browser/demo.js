@@ -23,6 +23,7 @@ var currentLevel = null;
 var basePicture = null;
 var hoverTimer = 0;
 var lastHoverBlock = -1;
+var blockSizes = null;
 
 var viewer = new Viewer($("viewer"), { onHover: onHover, onPolygon: onPolygon });
 
@@ -132,7 +133,7 @@ async function openFileInDemo(f, fromKept) {
 	$("viewerEmpty").classList.add("hidden");
 	renderInfo();
 	setStats();
-	["levelSelect", "sampleButton", "drawButton", "clearPolygon", "applyClip", "resetClip", "readButton"].forEach(function (id) { $(id).disabled = false; });
+	["levelSelect", "sampleButton", "drawButton", "clearPolygon", "applyClip", "resetClip", "readButton", "wholeButton"].forEach(function (id) { $(id).disabled = false; });
 	var select = $("levelSelect");
 	select.innerHTML = opened.grid.map(function (g) {
 		var lv = opened.levels[g.level];
@@ -142,7 +143,9 @@ async function openFileInDemo(f, fromKept) {
 	var start = 0;
 	opened.grid.forEach(function (g, k) { if (g.cols * g.rows <= 600000) start = k; });
 	select.value = String(start);
-	await showLevel(start);
+	await showLevel(start, true);
+	fillWhole();
+	await runRead();
 	if ($("keepToggle").checked && !fromKept) await keepCurrent();
 }
 
@@ -181,7 +184,7 @@ function i_levels() {
 // Blocks tab
 //----------------------------------------------------------
 
-async function showLevel(level) {
+async function showLevel(level, statsOnly) {
 	currentLevel = level;
 	renderLevelTable();
 	var result;
@@ -203,8 +206,11 @@ async function showLevel(level) {
 		total += result.sizes[i];
 	}
 	var bounds = levelPictureBounds(reader.info, opened.header, opened.grid[level]);
-	basePicture = { rgba: rgba, width: result.cols, height: result.rows, bounds: bounds, sizes: result.sizes };
-	viewer.setPicture({ rgba: rgba.slice(), width: result.cols, height: result.rows, bounds: bounds });
+	blockSizes = { cols: result.cols, rows: result.rows, sizes: result.sizes };
+	if (!statsOnly) {
+		basePicture = { rgba: rgba, width: result.cols, height: result.rows, bounds: bounds, sizes: result.sizes };
+		viewer.setPicture({ rgba: rgba.slice(), width: result.cols, height: result.rows, bounds: bounds });
+	}
 	$("levelStats").innerHTML = [
 		["blocks", result.sizes.length.toLocaleString()],
 		["bytes", formatBytes(total)],
@@ -241,8 +247,13 @@ function onHover(hit) {
 	}
 	var g = opened.grid[currentLevel];
 	var n = g.firstBlock + hit.py * g.cols + hit.px;
-	var size = basePicture && basePicture.sizes ? basePicture.sizes[hit.py * g.cols + hit.px] : 0;
-	hud.textContent = "x " + hit.map.x.toFixed(2) + "  y " + hit.map.y.toFixed(2) + "  ·  block " + n + " (row " + hit.py + ", col " + hit.px + ")  " + formatBytes(size);
+	var mapText = "x " + hit.map.x.toFixed(2) + "  y " + hit.map.y.toFixed(2);
+	if (!basePicture || !basePicture.sizes) {
+		hud.textContent = mapText;
+		return;
+	}
+	var size = basePicture.sizes[hit.py * g.cols + hit.px];
+	hud.textContent = mapText + "  ·  block " + n + " (row " + hit.py + ", col " + hit.px + ")  " + formatBytes(size);
 	if (n === lastHoverBlock || document.querySelector(".tab.active").dataset.tab !== "blocks") return;
 	clearTimeout(hoverTimer);
 	hoverTimer = setTimeout(function () { inspect(n); }, 120);
@@ -300,20 +311,35 @@ function applyPostSteps() {
 // Read tab
 //----------------------------------------------------------
 
+function fillWhole() {
+	var i = reader.info;
+	var wrap = $("viewerWrap");
+	var fit = Math.min(1, Math.max(wrap.clientWidth, 800) * (window.devicePixelRatio || 1) / i.width, Math.max(wrap.clientHeight, 500) * (window.devicePixelRatio || 1) / i.height);
+	$("readX").value = 0;
+	$("readY").value = 0;
+	$("readW").value = i.width;
+	$("readH").value = i.height;
+	$("readOutW").value = Math.max(1, Math.round(i.width * fit));
+	$("readOutH").value = Math.max(1, Math.round(i.height * fit));
+}
+
 async function runRead() {
 	var opts = {
 		x: Number($("readX").value), y: Number($("readY").value),
 		width: Number($("readW").value), height: Number($("readH").value),
 		outWidth: Number($("readOutW").value), outHeight: Number($("readOutH").value)
 	};
-	var code = "await ecw.readRegion(" + JSON.stringify(opts) + ");";
+	var code = "var img = await ecw.readRegion(" + JSON.stringify(opts) + ");";
+	var t0 = performance.now();
 	try {
-		var img = await reader.readRegion(opts);
-		viewer.setPicture({ rgba: img.data, width: img.width, height: img.height, bounds: img.bounds });
-		how(code, { width: img.width, height: img.height, bounds: img.bounds });
+		var img = await run("read", opts);
+		basePicture = { rgba: img.data, width: img.width, height: img.height, bounds: img.bounds };
+		viewer.setPicture({ rgba: img.data.slice(), width: img.width, height: img.height, bounds: img.bounds });
+		setProgress(1, "decoded " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
+		how(code, { width: img.width, height: img.height, level: img.level, bounds: img.bounds });
 	} catch (err) {
 		how(code, { error: err.code, message: err.message });
-		setError(err);
+		if (err.code !== "ABORTED") setError(err);
 	}
 }
 
@@ -402,6 +428,7 @@ $("resetClip").addEventListener("click", function () {
 	if (basePicture) viewer.setPicture({ rgba: basePicture.rgba.slice(), width: basePicture.width, height: basePicture.height, bounds: basePicture.bounds }, true);
 });
 $("readButton").addEventListener("click", runRead);
+$("wholeButton").addEventListener("click", function () { fillWhole(); runRead(); });
 $("keptList").addEventListener("click", function (e) { onScratchClick(e, KEPT_DIR); });
 $("scratchList").addEventListener("click", function (e) { onScratchClick(e, null); });
 $("refreshScratch").addEventListener("click", refreshScratch);

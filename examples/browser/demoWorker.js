@@ -2,13 +2,14 @@
 //==========================================================
 // Module Worker for the demo. Holds the dropped File and runs
 // demoCore jobs off the main thread.
-// In:  { id, type: "open" | "levelBlocks" | "inspect" | "sample" | "keep", payload }
+// In:  { id, type: "open" | "levelBlocks" | "inspect" | "sample" | "keep" | "read", payload }
 // Out: { id, type: "progress", fraction, label }
 //      { id, type: "result", result }   (typed arrays transferred)
 //      { id, type: "error", code, message }
 //==========================================================
 
 import { openFile, readLevelBlockSizes, inspectBlock, sampleModes, keepFile } from "./lib/demoCore.js";
+import { openEcw } from "../../src/index.js";
 
 var state = null;
 
@@ -21,7 +22,7 @@ function progressFor(id) {
 var handlers = {
 	open: async function (payload, onProgress) {
 		var opened = await openFile(payload.file, onProgress);
-		state = { file: payload.file, opened: opened };
+		state = { file: payload.file, opened: opened, reader: await openEcw(payload.file) };
 		return opened;
 	},
 	levelBlocks: function (payload, onProgress) {
@@ -29,6 +30,10 @@ var handlers = {
 	},
 	inspect: function (payload) {
 		return inspectBlock(state.file, state.opened.index, state.opened.grid, state.opened.info, payload.n);
+	},
+	read: async function (payload, onProgress) {
+		var img = await state.reader.readRegion(Object.assign({}, payload, { onProgress: onProgress }));
+		return { data: img.data, width: img.width, height: img.height, level: img.level, bounds: img.bounds };
 	},
 	keep: function (payload, onProgress) {
 		return keepFile(state.file, payload.name, onProgress);
@@ -43,7 +48,7 @@ self.onmessage = async function (event) {
 	try {
 		if (msg.type !== "open" && !state) throw new Error("no file open");
 		var result = await handlers[msg.type](msg.payload, progressFor(msg.id));
-		var transfer = result && result.sizes ? [result.sizes.buffer] : [];
+		var transfer = result && result.sizes ? [result.sizes.buffer] : result && result.data ? [result.data.buffer] : [];
 		self.postMessage({ id: msg.id, type: "result", result: result }, transfer);
 	} catch (err) {
 		self.postMessage({ id: msg.id, type: "error", code: err.code || "ERROR", message: err.message });

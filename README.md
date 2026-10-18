@@ -4,8 +4,9 @@ A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, p
 
 **Status: work in progress.** Nothing is published to npm yet and the API may change.
 
-- Working: `openEcw` reads the header, georeferencing and resolution levels.
-- Not yet: pixel decoding. `readRegion` rejects with `NOT_IMPLEMENTED` until the block format is worked out.
+- Working: `openEcw` reads the header, georeferencing and levels, and `readRegion` decodes imagery at any resolution.
+- Accuracy: output is within a few grey levels of the ECW SDK (via GDAL). Exact parity is still being worked out.
+- Not yet: `readRegionToScratch` (large outputs to OPFS), a Worker entry point, and writing ECW.
 
 ## Demo
 
@@ -40,7 +41,7 @@ ecw.info;
 
 `pixelWindowToBounds(ecw.info, x, y, width, height)` turns a pixel window into map-coordinate bounds.
 
-## Planned pixel API
+## Reading pixels
 
 ```js
 import { openEcw } from "ecw-js";
@@ -79,7 +80,7 @@ Everything throws or rejects with an `EcwError`. Branch on `error.code`; `error.
 | `INVALID_ARGUMENT` | A bad argument, such as a non-Blob or a reversed range |
 | `OUTPUT_TOO_LARGE` | A region read would exceed the in-memory limit |
 | `ABORTED` | The read was cancelled with an `AbortSignal` |
-| `NOT_IMPLEMENTED` | Pixel decoding is not available yet |
+| `NOT_IMPLEMENTED` | A feature that is not available yet (`readRegionToScratch`) |
 
 ## Scope
 

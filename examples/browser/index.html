@@ -77,7 +77,7 @@
 			</div>
 
 			<div class="tab-body hidden" id="tab-read">
-				<p class="muted">Decodes pixels with <code>readRegion</code>. Pixel decoding is still being reverse-engineered, so for now this shows the library's <code>NOT_IMPLEMENTED</code> error.</p>
+				<p class="muted">Decodes pixels with <code>readRegion</code>. x, y, width and height are full-resolution pixels; the library picks the coarsest level that is still sharp enough for outWidth × outHeight. Output is within a few grey levels of the ECW SDK; exact parity is still being worked on.</p>
 				<div class="form-grid">
 					<label>x <input type="number" id="readX" value="0"></label>
 					<label>y <input type="number" id="readY" value="0"></label>
@@ -86,7 +86,10 @@
 					<label>outWidth <input type="number" id="readOutW" value="1024"></label>
 					<label>outHeight <input type="number" id="readOutH" value="1024"></label>
 				</div>
-				<button class="button" id="readButton" disabled>Run readRegion</button>
+				<div class="row">
+					<button class="button" id="readButton" disabled>Run readRegion</button>
+					<button class="button" id="wholeButton" disabled>Whole image</button>
+				</div>
 			</div>
 
 			<div class="tab-body hidden" id="tab-scratch">
