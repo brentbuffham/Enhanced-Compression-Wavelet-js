@@ -21,10 +21,12 @@ function sampleIn(dir, id) {
 
 /**
  * Every private sample with a reference set. Ids, never file names, identify them.
+ * Empty when ECW_NO_SAMPLES=1 (to reproduce CI).
  * @returns {Array<{id:string, ecwPath:string, refDir:string}>}
  */
 export function findSamples() {
-	if (!fs.existsSync(SAMPLES_DIR)) return [];
+	// ECW_NO_SAMPLES=1 runs the suite the way CI sees it (no private samples)
+	if (process.env.ECW_NO_SAMPLES === "1" || !fs.existsSync(SAMPLES_DIR)) return [];
 	var list = [];
 	var root = sampleIn(SAMPLES_DIR, "a");
 	if (root) list.push(root);

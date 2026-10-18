@@ -2,12 +2,20 @@
 
 A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, published on npm as `ecw-js`. Plain ES modules, no dependencies, runs in the browser and in Node.
 
-**Status: work in progress.** Nothing is published to npm yet and the API may change.
+**Status: early (0.x).** It works and is tested, but the API may still change before 1.0.
 
 - Working: `openEcw` reads the header, georeferencing and levels; `readRegion` decodes imagery at any resolution; `readRegionToScratch` streams outputs too big for memory into OPFS.
 - Accuracy: matches the ECW SDK (via GDAL) bit for bit on two independent test files, at full resolution and at every overview level.
 - Also: a ready-made module Worker (`ecw-js/worker`).
 - Not yet: writing ECW.
+
+## Install
+
+```sh
+npm install ecw-js
+```
+
+Node 22 or newer, or any current browser. No dependencies.
 
 ## Demo
 
@@ -23,7 +31,7 @@ ECW is a common format for large orthophotos, and the only way to read it so far
 
 The format is being worked out from the bytes of real ECW files, the same way you'd reverse-engineer any undocumented binary. Each decoded output is checked against GDAL's output for the same window, using GDAL purely as a black box.
 
-No ECW SDK source code (libecw or Hexagon) is read, copied or translated. The findings are written up as a plain-English format spec in `docs/` as they're confirmed.
+No ECW SDK source code (libecw or Hexagon) is read, copied or translated. What's been worked out is written up as a plain-English format spec in [`docs/ECW_FORMAT_SPEC.md`](docs/ECW_FORMAT_SPEC.md).
 
 ## Reading the header
 

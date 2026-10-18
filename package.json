@@ -1,6 +1,6 @@
 {
 	"name": "ecw-js",
-	"version": "0.0.1",
+	"version": "0.1.0",
 	"description": "Zero-dependency JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, for the browser and Node.",
 	"type": "module",
 	"exports": {
@@ -19,7 +19,7 @@
 	},
 	"scripts": {
 		"test": "node --test \"test/**/*.test.js\"",
-		"test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
+		"test:coverage": "node --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-lines=97 --test-coverage-branches=88 --test-coverage-functions=97 \"test/**/*.test.js\"",
 		"demo": "node _dev/serve.mjs",
 		"check:private": "node _dev/checkPrivate.mjs"
 	},

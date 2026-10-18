@@ -26,3 +26,14 @@ test("VERSION export matches package.json", async function () {
 	var mod = await import("../src/index.js");
 	assert.equal(mod.VERSION, pkg.version);
 });
+
+test("CHANGELOG has a section for the package version", function () {
+	var log = readFileSync(new URL("../CHANGELOG.md", import.meta.url), "utf8");
+	var heading = "## " + pkg.version;
+	var lines = log.split("\n").map(function (l) { return l.trim(); });
+	assert.ok(lines.some(function (l) { return l === heading || l.indexOf(heading + " ") === 0; }), "no " + heading + " section");
+});
+
+test("the worker entry is exported and shipped", function () {
+	assert.equal(pkg.exports["./worker"], "./src/workers/ecwDecodeWorker.js");
+});
