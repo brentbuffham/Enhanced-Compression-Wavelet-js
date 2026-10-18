@@ -2,7 +2,8 @@
 //==========================================================
 // Canvas viewer: shows one RGBA "picture" spanning map bounds,
 // with wheel zoom, drag pan, hover reporting and a polygon tool.
-// Pixels are drawn nearest-neighbour so block maps stay crisp.
+// Block maps are drawn nearest-neighbour so they stay crisp; decoded
+// images (picture.smooth) are drawn with high-quality smoothing.
 // An optional detail layer (a sharper decode of the visible area)
 // is drawn over the picture; onViewChange fires when zoom/pan settle.
 //==========================================================
@@ -39,7 +40,7 @@ Viewer.prototype._resize = function () {
 
 /**
  * Show a picture.
- * @param {{rgba: Uint8ClampedArray, width: number, height: number, bounds: object}} picture
+ * @param {{rgba: Uint8ClampedArray, width: number, height: number, bounds: object, smooth?: boolean}} picture
  * @param {boolean} [keepView] - keep zoom/pan when the picture size is unchanged
  */
 Viewer.prototype.setPicture = function (picture, keepView) {
@@ -111,7 +112,8 @@ Viewer.prototype.draw = function () {
 	ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 	if (!this.bitmap || !this.view) return;
 	var v = this.view;
-	ctx.imageSmoothingEnabled = false;
+	ctx.imageSmoothingEnabled = !!this.picture.smooth;
+	ctx.imageSmoothingQuality = "high";
 	ctx.drawImage(this.bitmap, v.offsetX, v.offsetY, v.width * v.scale, v.height * v.scale);
 	if (this.detail) {
 		var tl = mapToScreen(v, this.detail.bounds.minX, this.detail.bounds.maxY);

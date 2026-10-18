@@ -308,7 +308,7 @@ function applyPostSteps() {
 	}
 	var cleared = 0;
 	for (var i = 3; i < rgba.length; i += 4) if (rgba[i] === 0) cleared++;
-	viewer.setPicture({ rgba: rgba, width: basePicture.width, height: basePicture.height, bounds: basePicture.bounds }, true);
+	viewer.setPicture({ rgba: rgba, width: basePicture.width, height: basePicture.height, bounds: basePicture.bounds, smooth: basePicture.smooth }, true);
 	how(calls.join("\n") || "// nothing to apply", { transparentPixels: cleared, of: rgba.length / 4 });
 }
 
@@ -342,7 +342,7 @@ async function refineView() {
 	refineBusy = true;
 	var t0 = performance.now();
 	try {
-		var img = await run("read", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, outWidth: outW, outHeight: outH }, true);
+		var img = await run("read", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, outWidth: outW, outHeight: outH, resample: $("readResample").value }, true);
 		if (seq === refineSeq) {
 			viewer.setDetail({ rgba: img.data, width: img.width, height: img.height, bounds: img.bounds });
 			setProgress(1, "detail " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
@@ -375,14 +375,15 @@ async function runRead() {
 	var opts = {
 		x: Number($("readX").value), y: Number($("readY").value),
 		width: Number($("readW").value), height: Number($("readH").value),
-		outWidth: Number($("readOutW").value), outHeight: Number($("readOutH").value)
+		outWidth: Number($("readOutW").value), outHeight: Number($("readOutH").value),
+		resample: $("readResample").value
 	};
 	var code = "var img = await ecw.readRegion(" + JSON.stringify(opts) + ");";
 	var t0 = performance.now();
 	try {
 		var img = await run("read", opts);
-		basePicture = { rgba: img.data, width: img.width, height: img.height, bounds: img.bounds };
-		viewer.setPicture({ rgba: img.data.slice(), width: img.width, height: img.height, bounds: img.bounds });
+		basePicture = { rgba: img.data, width: img.width, height: img.height, bounds: img.bounds, smooth: true };
+		viewer.setPicture({ rgba: img.data.slice(), width: img.width, height: img.height, bounds: img.bounds, smooth: true });
 		imageMode = true;
 		setProgress(1, "decoded " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
 		how(code, { width: img.width, height: img.height, level: img.level, bounds: img.bounds });
@@ -474,7 +475,7 @@ $("drawButton").addEventListener("click", function () { viewer.startPolygon(); $
 $("clearPolygon").addEventListener("click", function () { viewer.clearPolygon(); $("drawButton").classList.remove("active"); });
 $("applyClip").addEventListener("click", applyPostSteps);
 $("resetClip").addEventListener("click", function () {
-	if (basePicture) viewer.setPicture({ rgba: basePicture.rgba.slice(), width: basePicture.width, height: basePicture.height, bounds: basePicture.bounds }, true);
+	if (basePicture) viewer.setPicture({ rgba: basePicture.rgba.slice(), width: basePicture.width, height: basePicture.height, bounds: basePicture.bounds, smooth: basePicture.smooth }, true);
 });
 $("readButton").addEventListener("click", runRead);
 $("wholeButton").addEventListener("click", function () { fillWhole(); runRead(); });

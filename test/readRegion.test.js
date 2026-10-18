@@ -51,6 +51,22 @@ test("a downsampled read samples the level nearest each output pixel", async fun
 	assert.deepEqual([0, 1, 7].map(function (x) { return pixel(img, x, 0)[1]; }), [0, 10, 70]);
 });
 
+test("resample average blends the level pixels each output pixel covers", async function () {
+	var ecw = await openEcw(file(function (r, b, sb, x) { return r === 0 && b === 0 && sb === "LL" ? 10 * x : 0; }));
+	// 64 -> 6 columns: factor 10.67 picks level 0 (8 wide), each output pixel covers 1.33 level pixels
+	var near = await ecw.readRegion({ x: 0, y: 0, width: 64, height: 48, outWidth: 6, outHeight: 6 });
+	var avg = await ecw.readRegion({ x: 0, y: 0, width: 64, height: 48, outWidth: 6, outHeight: 6, resample: "average" });
+	assert.equal(avg.level, near.level);
+	// output column 1 covers level x 1.33..2.67: (0.67 * 10 + 0.67 * 20) / 1.33 = 15
+	assert.equal(pixel(near, 1, 0)[1], 20);
+	assert.equal(pixel(avg, 1, 0)[1], 15);
+});
+
+test("an unknown resample mode throws INVALID_ARGUMENT", async function () {
+	var ecw = await openEcw(file());
+	await assert.rejects(ecw.readRegion({ x: 0, y: 0, width: 8, height: 8, resample: "cubic" }), { code: "INVALID_ARGUMENT" });
+});
+
 test("transparentBelow and clipPolygon apply to the output", async function () {
 	var ecw = await openEcw(file());
 	var img = await ecw.readRegion({ x: 0, y: 0, width: 64, height: 48, transparentBelow: 120 });

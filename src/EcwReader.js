@@ -4,7 +4,7 @@
 // BlobSource, parses it through MemorySource, and exposes `info`.
 // readRegion picks the coarsest image level that is still as sharp as
 // the request, reconstructs only that window (RegionDecoder), samples
-// it to the output size and converts to RGBA. readRegionToScratch is
+// it to the output size (nearest or box average) and converts to RGBA. readRegionToScratch is
 // still NOT_IMPLEMENTED.
 //==========================================================
 
@@ -16,6 +16,7 @@ import { parseLevels } from "./format/EcwLevels.js";
 import { parseBlockIndex, blockGrid, blockEntryWindow, blockByteRange } from "./format/EcwBlockIndex.js";
 import { pixelWindowToBounds } from "./format/georef.js";
 import { createDecodeContext, decodeWindow, imageLevelSize, countWindowBlocks } from "./decode/RegionDecoder.js";
+import { sampleWindow } from "./decode/sampleWindow.js";
 import { yuvToRgba, greyToRgba } from "./codec/colour.js";
 import { applyTransparency } from "./post/applyTransparency.js";
 import { clipToPolygon } from "./post/clipToPolygon.js";
@@ -71,9 +72,11 @@ function isCount(v) {
 /**
  * Decode a region to RGBA.
  * @param {{x:number, y:number, width:number, height:number, outWidth?:number, outHeight?:number,
- *   transparentBelow?:number, clipPolygon?:Array, onProgress?:function(number, string),
- *   signal?:AbortSignal, maxOutputBytes?:number}} opts
+ *   resample?:"nearest"|"average", transparentBelow?:number, clipPolygon?:Array,
+ *   onProgress?:function(number, string), signal?:AbortSignal, maxOutputBytes?:number}} opts
  *   x, y, width, height are full-resolution pixels; outWidth/outHeight default to width/height.
+ *   resample "nearest" (default) matches GDAL / the ECW SDK exactly; "average" box-averages
+ *   the decoded level for smooth downsampling between levels.
  * @returns {Promise<{data:Uint8ClampedArray, width:number, height:number, level:number,
  *   bounds:{minX:number, minY:number, maxX:number, maxY:number}}>}
  */
@@ -92,6 +95,8 @@ EcwReader.prototype.readRegion = async function (opts) {
 	if (outW * outH * 4 > maxBytes) {
 		throw new EcwError(ERROR_CODES.OUTPUT_TOO_LARGE, "output of " + outW + "x" + outH + " exceeds " + maxBytes + " bytes; use readRegionToScratch");
 	}
+	var resample = o.resample === undefined ? "nearest" : o.resample;
+	if (resample !== "nearest" && resample !== "average") throw invalid("resample must be \"nearest\" or \"average\"");
 	if (o.signal && o.signal.aborted) throw new EcwError(ERROR_CODES.ABORTED, "decode aborted");
 
 	// Step 2) Choose the image level: coarsest one still at least as sharp as the output
@@ -122,16 +127,8 @@ EcwReader.prototype.readRegion = async function (opts) {
 	ctx.onBlock = function (done) { report(0.95 * done / total, "decoded " + done + " of " + total + " blocks"); };
 	var win = await decodeWindow(ctx, level, lx0, ly0, lx1, ly1);
 
-	// Step 4) Sample to the output grid (nearest level pixel to each output pixel centre)
-	var winW = lx1 - lx0, winH = ly1 - ly0;
-	var sampled = win.bands.map(function () { return new Float32Array(outW * outH); });
-	for (var oy = 0; oy < outH; oy++) {
-		var sy = Math.min(winH - 1, Math.max(0, Math.floor((o.y + (oy + 0.5) * o.height / outH) / scale) - ly0));
-		for (var ox = 0; ox < outW; ox++) {
-			var sx = Math.min(winW - 1, Math.max(0, Math.floor((o.x + (ox + 0.5) * o.width / outW) / scale) - lx0));
-			for (var b = 0; b < sampled.length; b++) sampled[b][oy * outW + ox] = win.bands[b][sy * winW + sx];
-		}
-	}
+	// Step 4) Sample to the output grid
+	var sampled = sampleWindow(win.bands, lx1 - lx0, ly1 - ly0, o, scale, lx0, ly0, outW, outH, resample);
 
 	// Step 5) Colour and optional post-steps
 	var data = new Uint8ClampedArray(outW * outH * 4);
