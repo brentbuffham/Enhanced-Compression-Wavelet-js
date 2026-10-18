@@ -151,6 +151,12 @@ async function readPackIndex(file) {
 	}
 }
 
+// A pack file's sequence number ("pack-<seq>-..."), 0 for other names
+function packSeq(name) {
+	var m = /^pack-(\d+)-/.exec(name);
+	return m ? Number(m[1]) : 0;
+}
+
 async function writeFile(dir, name, bytes) {
 	var handle = await dir.getFileHandle(name, { create: true });
 	if (typeof handle.createSyncAccessHandle === "function") {
@@ -201,7 +207,8 @@ export function BlockCache(options) {
 	this._pending = [];
 	this._pendingBytes = 0;
 	this._flushing = Promise.resolve();
-	this._packCount = 0;
+	// sequence of the newest pack on disk; new packs continue from it so names sort oldest first
+	this._packSeq = 0;
 	this._packBuffers = new Map();
 	this._stats = { hits: 0, misses: 0, opfsHits: 0 };
 }
@@ -286,7 +293,8 @@ BlockCache.prototype._load = function () {
 			var dir = await (await cacheRoot(self._opfs, true)).getDirectoryHandle(self._fingerprint, { create: true });
 			var names = [];
 			for await (var handle of dir.values()) if (handle.kind === "file") names.push(handle.name);
-			names.sort();
+			names.sort(function (x, y) { return packSeq(x) - packSeq(y) || (x < y ? -1 : x > y ? 1 : 0); });
+			names.forEach(function (n) { self._packSeq = Math.max(self._packSeq, packSeq(n)); });
 			for (var name of names) {
 				var file = await (await dir.getFileHandle(name)).getFile();
 				self._addPack(name, file, await readPackIndex(file));
@@ -331,8 +339,8 @@ BlockCache.prototype._writePack = async function () {
 	try {
 		var dir = await this._load();
 		var pack = buildPack(entries);
-		// names sort oldest first: time, then this instance's sequence
-		var name = "pack-" + String(Date.now()).padStart(15, "0") + "-" + String(++this._packCount).padStart(6, "0") + "-" + Math.random().toString(36).slice(2, 8) + ".ecwp";
+		// names sort oldest first by sequence, even when written in the same millisecond
+		var name = "pack-" + String(++this._packSeq).padStart(15, "0") + "-" + Math.random().toString(36).slice(2, 8) + ".ecwp";
 		this._addPack(name, await writeFile(dir, name, pack.bytes), pack.index);
 		await this._evict(dir);
 	} catch (err) {

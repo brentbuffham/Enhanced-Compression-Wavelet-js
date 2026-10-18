@@ -164,3 +164,28 @@ test("fileFingerprint changes with name, size, date or the first bytes", async f
 	changed[100] ^= 1;
 	assert.notEqual(await fileFingerprint(new File([changed], "a.ecw", { lastModified: 1000 })), base);
 });
+
+test("packs written in the same millisecond still evict oldest first", async function () {
+	var realNow = Date.now;
+	Date.now = function () { return 1000; };
+	try {
+		for (var round = 0; round < 12; round++) {
+			var root = createFakeRoot();
+			var opts = { tileSize: 4, fingerprint: "fp", memoryBytes: 0, opfs: { root: root } };
+			var first = new BlockCache(opts);
+			await first.put(1, 0, 0, tile(4, 4, 1));
+			await first.flush();
+			opts.opfs.maxBytes = (await blockCacheUsage({ root: root }))[0].bytes * 2;
+			for (var k = 1; k <= 2; k++) {
+				var next = new BlockCache(opts);
+				await next.put(1, k, 0, tile(4, 4, 1 + k));
+				await next.flush();
+			}
+			var check = new BlockCache(opts);
+			assert.equal(await check.get(1, 0, 0), null, "round " + round + ": the first pack goes first");
+			assert.ok(await check.get(1, 2, 0), "round " + round + ": the newest pack stays");
+		}
+	} finally {
+		Date.now = realNow;
+	}
+});
