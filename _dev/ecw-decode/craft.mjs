@@ -14,6 +14,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { findSample, readRange } from "../../test/helpers/samples.js";
 import { readTiff } from "../../test/helpers/readTiff.js";
+import { encodeMode2 } from "../../test/helpers/encodeMode2.js";
 
 var QGIS_BIN = process.env.QGIS_BIN || "C:\\Program Files\\QGIS 4.2.3\\bin";
 var GDAL_APPS = path.join(QGIS_BIN, "..", "apps", "gdal");
@@ -34,6 +35,15 @@ function encodeMode6(values) {
 	return out;
 }
 
+// Values -> mode-2 symbols: zero runs and signed literals
+function toSymbols(vals) {
+	var out = [], run = 0;
+	function flush() { while (run > 0) { var n = Math.min(run, 0x3FFF); out.push({ kind: "z", m: n }); run -= n; } }
+	vals.forEach(function (v) { if (v === 0) { run++; return; } flush(); out.push({ kind: v > 0 ? "+" : "-", m: Math.abs(v) }); });
+	flush();
+	return out;
+}
+
 function frame(streams) {
 	var header = (streams.length - 1) * 4;
 	var total = header + streams.reduce(function (s, st) { return s + st.length; }, 0);
@@ -45,7 +55,8 @@ function frame(streams) {
 /**
  * @param {{width:number, height:number, levelCount:number, bands?:number, block?:number,
  *   steps?:function(number):{a:number,b:number,c:number},
- *   coeff:function(number, number, string, number, number):number}} o
+ *   coeff:function(number, number, string, number, number):number, mode?:number}} o
+ *   mode 2 writes Huffman streams (test encoder), default 6 writes run-length words.
  * @returns {Uint8Array} ECW file bytes
  */
 export function craftEcw(o) {
@@ -64,7 +75,9 @@ export function craftEcw(o) {
 			for (var b = 0; b < bands; b++) subbands.forEach(function (sb) {
 				var vals = [];
 				for (var y = 0; y < ph; y++) for (var x = 0; x < pw; x++) vals.push(o.coeff(r, b, sb, bx * block + x, by * block + y));
-				streams.push(vals.every(function (v) { return v === 0; }) ? Uint8Array.of(5) : encodeMode6(vals));
+				if (vals.every(function (v) { return v === 0; })) { streams.push(Uint8Array.of(5)); return; }
+				if (o.mode === 2) { var payload = encodeMode2(toSymbols(vals)); var st = new Uint8Array(1 + payload.length); st[0] = 2; st.set(payload, 1); streams.push(st); return; }
+				streams.push(encodeMode6(vals));
 			});
 			blocks.push(frame(streams));
 		}

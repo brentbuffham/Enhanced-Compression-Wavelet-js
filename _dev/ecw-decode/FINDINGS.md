@@ -123,6 +123,21 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 
 - The original centre crops fell in the black notch of the footprint and matched trivially. `makeRefs.mjs` now places the aligned and straddle crops inside the imagery (nearest solid point to the imagery centroid on the finest level reference).
 
+## ⭐ CRACKED: colour conversion (exact)
+
+- Method: craft ECW files with chosen coefficients (`_dev/ecw-decode/craft.mjs`, header template from the private sample) and let the SDK decode them through QGIS GDAL. One level with zero details makes every even-even output pixel equal one LL value, so a single file reads out thousands of (Y, Cb, Cr) → RGB pairs.
+- The SDK floors Y, Cb and Cr to integers, then: `R = Y + T_R(Cr)`, `G = Y + T_GB(Cb) + T_GR(Cr)`, `B = Y + T_B(Cb)`, clamped. Each table is `floor(k·c + off + 0.5)` with k / off = 1.40228 / 1.011 (R), 1.77151 / 1.0075 (B), −0.34349 / −0.0075 (G from Cb), −0.71464 / −0.03 (G from Cr). These reproduce all 256 entries of each table swept from the SDK, and 100% of 65,000 random combinations and of half / quarter fractional inputs.
+- Effect on Sample A: level 1 now matches GDAL exactly (100%); levels 2–5 are 99.3 → 93.5% exact; full resolution 59% (max error 3).
+
+## Narrowed: what is left at deeper levels
+
+- Crafted files (even sizes, mode 6): 1 and 2 levels decode exactly, with random details on every record. With 3 levels, only the last record's details cause mismatches: always at odd-odd pixels, the SDK always 1 lower, and only where our luma is within ~5/64 above an integer.
+- The SDK's intermediate levels floor-match ours exactly (GDAL outsize at levels 1 and 2 = 100%).
+- Almost every mismatch has a nonzero HH coefficient within ±2 of the pixel (our model uses only the HH at the pixel). So at the finest synthesis step the SDK's HH reach is wider than ours with small weights.
+- Also: odd image sizes (crafted 491×257, two levels) give 98.6% exact, so edge handling for odd sizes differs slightly.
+- Crafted mode-2 streams from the test encoder (long chain codes) are not decoded the same by the SDK; real mode-2 streams are. Likely a code-length limit in the SDK; not investigated.
+- Ruled out here: fixed-point lifting with 2–8 fractional bits (floor / trunc / round); limited precision between row and column passes; phase-specific truncation of intermediate levels.
+
 ## Open: the last ±1
 
 - Black background (all coefficients 0) decodes to (0,0,0); GDAL gives (1,0,1). So the SDK's colour step has offsets or chroma bias we do not reproduce.

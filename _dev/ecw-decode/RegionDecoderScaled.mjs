@@ -13,7 +13,7 @@
 import { EcwError, ERROR_CODES } from "../../src/errors.js";
 import { splitBlockStreams } from "../../src/format/EcwBlockFrame.js";
 import { decodeStream } from "../../src/codec/streams.js";
-import { synthesizeWindow, requiredCoefficientWindow } from "../../src/codec/wavelet.js";
+import { synthesizeWindow, requiredCoefficientWindow } from "./waveletProbe.mjs";
 
 /**
  * @param {{header:object, levels:Array, index:object, grid:Array,
@@ -144,7 +144,7 @@ export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
 			LL: low.bands[b], LH: details[b].LH, HL: details[b].HL, HH: details[b].HH
 		}, x0, y0, x1, y1));
 	}
-	if (ctx.levelRound) bands = bands.map(function (arr, b) { return arr.map(function (v) { return ctx.levelRound(v, j, b); }); });
+	if (ctx.levelRound) bands = bands.map(function (arr, b) { var ww = x1 - x0; return arr.map(function (v, q) { return ctx.levelRound(v, j, b, x0 + (q % ww), y0 + Math.floor(q / ww)); }); });
 	return { width: x1 - x0, height: y1 - y0, bands: bands };
 }
 
