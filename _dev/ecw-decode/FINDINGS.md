@@ -69,6 +69,26 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Streams 3 to 8 (bands 1 and 2) are empty in about 98% of blocks, while streams 0 to 2 are coded about 40% of the time. Hypothesis: an internal luma/chroma colour transform, with chroma detail mostly quantised to zero.
 - Whole-block entropy is about 7.5 bits/byte: real entropy coding, not raw coefficients.
 
+## ⭐ CRACKED: mode 6 streams (run-length words)
+
+- Payload after the mode byte is u16 LE words. Top two bits are a tag, low 14 bits a magnitude:
+  - `00`: value `+m`
+  - `01`: value `-m`
+  - `10`: `m` zeros
+  - `11`: never seen
+- Self-delimiting: the decoded value count equals the block's extent in its level (`min(64, levelW - col*64) × min(64, levelH - row*64)`), and the stream ends exactly on its last word. Checked on all 2,055 mode-6 streams in 6,000 sampled blocks: 2,055 exact, 0 mismatches.
+- Example (59×1 edge block, band 0 first stream): `8020 0001 4005` then 25 literals → 32 zeros, +1, −5, then image-like values 31…121.
+
+## Partly cracked: mode 2 streams
+
+- Payload: u32 LE `N`, then an `N`-byte table, then a high-entropy bitstream (mostly 1-bits on sparse blocks: a dominant short code).
+- Table tokens are byte-aligned. Three kinds seen across 400 tables:
+  - `0x00` (most common)
+  - `0x80` followed by a u16 LE mode-6 word (all three tags seen: + value, − value, zero run). Example `80 21 80` = 0x8021 = 33 zeros in the 59×1 block, matching its mode-6 neighbours.
+  - single bytes `0x41–0x4F`, `0x51–0x5F`, `0x61–0x6F` (low nibble 0 never appears): three kinds × values 1–15, likely compact forms of the three mode-6 tags.
+- With that tokenisation 264 of 400 tables end exactly at `N`; the rest overrun by one byte (all large level-0 tables so far). Something in the tokenisation or the meaning of `N` is still off.
+- Ruled out: bit-packed pre-order tree (any bit order, leaf flag, 8/16-bit symbols); byte pre-order tree with `00` as internal node (closes after a few tokens).
+
 ## Open (for the codec plan)
 
 - What modes `2` and `6` are (likely candidates: run-length plus Huffman, or an adaptive arithmetic coder). Bytes after the tag start e.g. `27 01 00 …` and `20 80 01 …`.
