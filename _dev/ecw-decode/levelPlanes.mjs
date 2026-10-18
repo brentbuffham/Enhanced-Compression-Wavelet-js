@@ -17,7 +17,7 @@ import { decodeMode6 } from "./mode6Check.mjs";
 import { readTree } from "./mode2Decode.mjs";
 
 export function decodeMode2Values(bytes, count) {
-	var t = readTree(bytes, { 4: "+", 5: "-", 6: "z" });
+	var t = readTree(bytes, process.env.ECW_SHORTMAP === "swap" ? { 4: "-", 5: "+", 6: "z" } : { 4: "+", 5: "-", 6: "z" });
 	var pos = t.dataStart * 8;
 	var out = new Int32Array(count);
 	var n = 0;

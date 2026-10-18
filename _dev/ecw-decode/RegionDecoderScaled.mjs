@@ -1,4 +1,4 @@
-// _dev/ecw-decode/RegionDecoderScaled.mjs: probe copy of src/decode/RegionDecoder.js with ctx.detailScale(record)
+// _dev/ecw-decode/RegionDecoderScaled.mjs: probe copy of src/decode/RegionDecoder.js with ctx.dequant(record, band, subband, value, levelRecord)
 //==========================================================
 // Windowed reconstruction of any image level (FINDINGS.md
 // "coefficient layout"). Image level 0 is record 0's LL; image level
@@ -135,8 +135,7 @@ export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
 	var c = requiredCoefficientWindow(lv.width, lv.height, x0, y0, x1, y1);
 	var low = await decodeWindow(ctx, record, c.x0, c.y0, c.x1, c.y1);
 	var details = await readCoefficients(ctx, record, ["LH", "HL", "HH"], c.x0, c.y0, c.x1, c.y1);
-	if (ctx.detailScale) details.forEach(function (bd, bandIndex) {
-		var sc = ctx.detailScale(record, bandIndex); ["LH", "HL", "HH"].forEach(function (sb) { var a = bd[sb]; for (var q = 0; q < a.length; q++) a[q] *= sc; }); });
+	if (ctx.dequant) details.forEach(function (bd, bandIndex) { ["LH", "HL", "HH"].forEach(function (sb) { var arr = bd[sb]; for (var q = 0; q < arr.length; q++) arr[q] = ctx.dequant(record, bandIndex, sb, arr[q], lv); }); });
 	// Step 2) Synthesise each band
 	var bands = [];
 	for (var b = 0; b < h.bands; b++) {
@@ -145,6 +144,7 @@ export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
 			LL: low.bands[b], LH: details[b].LH, HL: details[b].HL, HH: details[b].HH
 		}, x0, y0, x1, y1));
 	}
+	if (ctx.levelRound) bands = bands.map(function (arr, b) { return arr.map(function (v) { return ctx.levelRound(v, j, b); }); });
 	return { width: x1 - x0, height: y1 - y0, bands: bands };
 }
 

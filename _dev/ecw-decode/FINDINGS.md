@@ -128,6 +128,15 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Black background (all coefficients 0) decodes to (0,0,0); GDAL gives (1,0,1). So the SDK's colour step has offsets or chroma bias we do not reproduce.
 - Best so far: float synthesis, BT.601, +0.5 on R and B: 75% exact at level 2. Per-channel searches (rounding mode × offset × coefficient variants) top out at 72–82% per channel; Y/U/V offsets at 73%.
 - Ruled out: integer lifting with floor/ceil/trunc at either step (worse); rounding between row and column passes; rounding Y/U/V before conversion; 2×2 averaging of the next level; detail or LL dequantisation offsets; detail scale factors.
+- Second round (with quantisation steps known), also ruled out:
+  - mid-bin dequantisation `(q ± δ)·step` for δ = 0.25, 0.375, 0.5 and `q·step ± (step−1)/2` (all worse than plain `q·step`);
+  - rounding, flooring or truncating each rebuilt level before it feeds the next (much worse);
+  - tiled synthesis: error is flat across 128-px block positions at full resolution;
+  - a hidden dependence on the next record's details (adding them to the fit does not help);
+  - neighbour blending / sub-pixel resampling (3×3 fit puts weight 1.000 on the centre pixel);
+  - ordered dither (signed error is a flat −0.04 on an 8×8 grid);
+  - swapped short-token signs in mode 2 (mean error 0.23 → 7.3).
+- What is left: the SDK's per-pixel values differ from our float reconstruction by roughly ±0.4, evenly in flat and busy areas, and no linear function of our Y/U/V (even with free coefficients) gets past ~80% exact per channel. Error grows slowly with depth (levels 1–5: 78% → 70% exact; full resolution 24%, mean 1.1, max 4).
 
 ## Open (for the codec plan)
 
