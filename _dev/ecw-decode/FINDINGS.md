@@ -97,6 +97,29 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Example (9 nodes): tree `. +1 . z62 . . z3585 z319 −1`, data `2b ef 32 00` → `z319 +1 z62 +1 0 z62 0 +1 z62 +1 z3585`: a short vertical line of coefficients at columns 62–63, rows 4–7.
 - Ruled out on the way: u32 table length (the first two `00` after `N` are tree nodes); bit-packed trees; reading short tokens as all-values or `5v` as runs.
 
+## ⭐ CRACKED: coefficient layout
+
+- Each stream lists its block's values row by row over the block's extent in its level.
+- Level record `k`'s subbands are the size of record `k`; synthesising them gives an image twice the size, which is the LL of record `k + 1` (cropped to that record's size). Record 0 carries the LL. Ten records plus synthesis give the full image.
+
+## ⭐ CRACKED (to ±1–3 grey levels): inverse wavelet and colour
+
+- 1-D synthesis, applied to rows (with `HL` as the row high-pass) and then to columns (`LH` / `HH`):
+  - even sample `x[2n] = s[n] − (d[n−1] + d[n]) / 2`
+  - odd sample `x[2n+1] = (s[n] + s[n+1]) / 2 + d[n]`
+  - edges clamp to the nearest coefficient.
+  Fitted from the GDAL level-1 reference: per phase, the taps come out as exactly this pattern (×0.95–0.97 gain from the fit), no taps beyond ±1, and a 5×5 fit does not improve on it.
+- Coefficients are used as decoded: no dequantisation scale (detail scale 1.0 beats 0.8–1.05), no mid-bin offset.
+- Band 0 is luma, bands 1 and 2 chroma (Cb-like, Cr-like). A free 3×4 fit on 52,000 level-2 pixels gives `R = Y + 1.4017·Cr`, `G = Y − 0.3537·Cb − 0.7082·Cr`, `B = Y + 1.7705·Cb`: BT.601 YCbCr, luma gain 1.000.
+- GDAL's level-k output is our reconstruction at level k. Its coarsest overview (record 0's size) is the record-1 reconstruction sampled at even pixels.
+- Accuracy with float synthesis and BT.601 + rounding: level 1 47% exact, 99.9% within ±1; level 2 46% exact within ±2; level 5 (8 M pixels) max error 3, mean 0.6. Level 5 rebuilds in 1.8 s in Node.
+
+## Open: the last ±1
+
+- Black background (all coefficients 0) decodes to (0,0,0); GDAL gives (1,0,1). So the SDK's colour step has offsets or chroma bias we do not reproduce.
+- Best so far: float synthesis, BT.601, +0.5 on R and B: 75% exact at level 2. Per-channel searches (rounding mode × offset × coefficient variants) top out at 72–82% per channel; Y/U/V offsets at 73%.
+- Ruled out: integer lifting with floor/ceil/trunc at either step (worse); rounding between row and column passes; rounding Y/U/V before conversion; 2×2 averaging of the next level; detail or LL dequantisation offsets; detail scale factors.
+
 ## Open (for the codec plan)
 
 - Meaning of level-record `a/b/c`, header bytes `0x02–0x03`, `0x05`, `0x10`, and the index flag byte.

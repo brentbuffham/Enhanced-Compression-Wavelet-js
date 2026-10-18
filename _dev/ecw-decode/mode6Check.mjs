@@ -33,40 +33,42 @@ export function decodeMode6(bytes) {
 	return { values: values, tag11: tag11 };
 }
 
-var file = process.argv[2];
-var samples = Number(process.argv[3] || 4000);
-var size = fs.statSync(file).size;
-var source = new MemorySource(readFileRange(fs, file, 0, 8192));
-var header = parseHeader(source);
-var levels = parseLevels(source, header);
-var index = parseBlockIndex(source, header);
-var grid = blockGrid(header, levels);
-var total = totalBlocks(grid);
-var stats = { streams: 0, match: 0, mismatch: 0, odd: 0, tag11: 0 };
-var examples = [];
-for (var i = 0; i < samples; i++) {
-	var n = Math.floor(i * total / samples);
-	var level = grid.findIndex(function (g) { return n < g.firstBlock + g.cols * g.rows; });
-	var g = grid[level];
-	var local = n - g.firstBlock;
-	var row = Math.floor(local / g.cols), col = local % g.cols;
-	var pw = Math.min(header.blockWidth, levels[level].width - col * header.blockWidth);
-	var ph = Math.min(header.blockHeight, levels[level].height - row * header.blockHeight);
-	var w = blockEntryWindow(index, n);
-	var r = blockByteRange(index, n, readFileRange(fs, file, w.start, 16), size);
-	var streams = splitBlockStreams(readFileRange(fs, file, r.start, r.end - r.start), header.bands, level);
-	streams.forEach(function (s, k) {
-		if (s.mode !== 6) return;
-		stats.streams++;
-		var d = decodeMode6(s.bytes);
-		if (d.odd) { stats.odd++; return; }
-		if (d.tag11) stats.tag11++;
-		if (d.values.length === pw * ph) stats.match++;
-		else {
-			stats.mismatch++;
-			if (examples.length < 8) examples.push({ n: n, level: level, stream: k, extent: pw + "x" + ph, got: d.values.length });
-		}
-	});
+if (process.argv[1] && process.argv[1].endsWith("mode6Check.mjs")) {
+	var file = process.argv[2];
+	var samples = Number(process.argv[3] || 4000);
+	var size = fs.statSync(file).size;
+	var source = new MemorySource(readFileRange(fs, file, 0, 8192));
+	var header = parseHeader(source);
+	var levels = parseLevels(source, header);
+	var index = parseBlockIndex(source, header);
+	var grid = blockGrid(header, levels);
+	var total = totalBlocks(grid);
+	var stats = { streams: 0, match: 0, mismatch: 0, odd: 0, tag11: 0 };
+	var examples = [];
+	for (var i = 0; i < samples; i++) {
+		var n = Math.floor(i * total / samples);
+		var level = grid.findIndex(function (g) { return n < g.firstBlock + g.cols * g.rows; });
+		var g = grid[level];
+		var local = n - g.firstBlock;
+		var row = Math.floor(local / g.cols), col = local % g.cols;
+		var pw = Math.min(header.blockWidth, levels[level].width - col * header.blockWidth);
+		var ph = Math.min(header.blockHeight, levels[level].height - row * header.blockHeight);
+		var w = blockEntryWindow(index, n);
+		var r = blockByteRange(index, n, readFileRange(fs, file, w.start, 16), size);
+		var streams = splitBlockStreams(readFileRange(fs, file, r.start, r.end - r.start), header.bands, level);
+		streams.forEach(function (s, k) {
+			if (s.mode !== 6) return;
+			stats.streams++;
+			var d = decodeMode6(s.bytes);
+			if (d.odd) { stats.odd++; return; }
+			if (d.tag11) stats.tag11++;
+			if (d.values.length === pw * ph) stats.match++;
+			else {
+				stats.mismatch++;
+				if (examples.length < 8) examples.push({ n: n, level: level, stream: k, extent: pw + "x" + ph, got: d.values.length });
+			}
+		});
+	}
+	console.log(JSON.stringify(stats));
+	examples.forEach(function (e) { console.log(JSON.stringify(e)); });
 }
-console.log(JSON.stringify(stats));
-examples.forEach(function (e) { console.log(JSON.stringify(e)); });
