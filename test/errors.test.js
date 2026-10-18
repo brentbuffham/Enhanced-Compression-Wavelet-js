@@ -25,7 +25,7 @@ test("EcwError without offset leaves message alone", function () {
 
 test("ERROR_CODES is frozen and lists every code", function () {
 	assert.ok(Object.isFrozen(ERROR_CODES));
-	assert.deepEqual(Object.keys(ERROR_CODES).sort(), ["ABORTED", "BAD_LEVEL_TABLE", "INVALID_ARGUMENT", "NOT_ECW",
+	assert.deepEqual(Object.keys(ERROR_CODES).sort(), ["ABORTED", "BAD_BLOCK", "BAD_BLOCK_INDEX", "BAD_LEVEL_TABLE", "INVALID_ARGUMENT", "NOT_ECW",
 		"NOT_IMPLEMENTED", "OUTPUT_TOO_LARGE", "TRUNCATED", "UNSUPPORTED_VERSION"]);
 	Object.keys(ERROR_CODES).forEach(function (k) { assert.equal(ERROR_CODES[k], k); });
 });

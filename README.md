@@ -68,6 +68,8 @@ Everything throws or rejects with an `EcwError`. Branch on `error.code`; `error.
 | `UNSUPPORTED_VERSION` | An ECW version other than 2 |
 | `TRUNCATED` | The file ends before the data it describes |
 | `BAD_LEVEL_TABLE` | The resolution-level table is inconsistent |
+| `BAD_BLOCK_INDEX` | The block index is inconsistent (wrong length, falling offsets, wrong entry count) |
+| `BAD_BLOCK` | A block's internal stream table is inconsistent |
 | `INVALID_ARGUMENT` | A bad argument, such as a non-Blob or a reversed range |
 | `OUTPUT_TOO_LARGE` | A region read would exceed the in-memory limit |
 | `ABORTED` | The read was cancelled with an `AbortSignal` |
