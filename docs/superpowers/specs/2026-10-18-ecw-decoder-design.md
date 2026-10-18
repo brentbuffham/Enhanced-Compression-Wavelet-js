@@ -135,7 +135,7 @@ Evidence comes from a private RGB ECW v2 orthophoto. Its details stay out of the
 | `0x130`.. | rising u64 LE | Probable block offset table | hypothesis |
 
 Level records run coarsest first. Level `k` of `n` has size `ceil(W / 2^(n-k))` × `ceil(H / 2^(n-k))`; full resolution is not a record.
-On the sample, `a/b/c` are 1,1,1 for the six coarsest levels, then double each level from (1,3,3).
+On the sample, `a/b/c` stay at 1 for the coarsest levels, then grow with level.
 GDAL reports floor-sized overviews and omits the coarsest stored level; its coarsest overview repeats every value in pairs, consistent with upsampling that level.
 Mixed endianness: integers big-endian, doubles little-endian.
 

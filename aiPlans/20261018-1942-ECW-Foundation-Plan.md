@@ -206,7 +206,7 @@ test("formatHexRows labels the row an annotation starts in", function () {
 
 - [ ] **Step 2: Run** `npm test` — Expected: FAIL.
 - [ ] **Step 3: Implement** `probeLib.mjs` and the two CLIs. Seed `FINDINGS.md` with: sample table (private RGB v2 sample, no identifying values), the spec §7 offset table, the level-table rule, GDAL's floor-sized overviews and pair-repeated coarsest overview, a `⭐ CRACKED` banner on header + level table, and an empty "Ruled out (don't re-walk)" list.
-- [ ] **Step 4: Copy the private ECW into `samples/`** (gitignored), then run `npm test` and `node _dev/ecw-decode/hexAnnotate.mjs samples/<sample>.ecw 0 0x60` — Expected: tests pass; dump shows `0x00000000: 65 02 01 02 0a 04`.
+- [ ] **Step 4: Copy the private ECW into `samples/`** (gitignored), then run `npm test` and `node _dev/ecw-decode/hexAnnotate.mjs samples/<sample>.ecw 0 0x60` — Expected: tests pass; dump starts `0x00000000: 65 02`.
 - [ ] **Step 5: Commit** — `chore: hex/entropy probes and FINDINGS log`
 
 ---
