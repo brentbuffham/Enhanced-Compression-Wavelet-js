@@ -6,7 +6,8 @@ A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, p
 
 - Working: `openEcw` reads the header, georeferencing and levels; `readRegion` decodes imagery at any resolution; `readRegionToScratch` streams outputs too big for memory into OPFS.
 - Accuracy: matches the ECW SDK (via GDAL) bit for bit on the test data, at full resolution and at every overview level.
-- Not yet: a Worker entry point, and writing ECW.
+- Also: a ready-made module Worker (`ecw-js/worker`).
+- Not yet: writing ECW.
 
 ## Demo
 
@@ -77,6 +78,24 @@ reader.close();
 ```
 
 The bytes are exactly what `readRegion` would have returned. Scratch files are removed by `ecw.close()`; call `sweepStaleScratchFiles()` at startup to clear any left behind by a crashed tab (older than 24 hours by default).
+
+## In a Worker
+
+Decoding big regions takes a while, so keep it off the main thread. `ecw-js/worker` is a module Worker that speaks a small message protocol: send `{ id, type, payload }`, get back `progress` messages and then one `result` or `error` with the same `id`.
+
+```js
+var worker = new Worker(new URL("ecw-js/worker", import.meta.url), { type: "module" });
+worker.onmessage = function (event) {
+	var msg = event.data; // { id, type: "progress", fraction, label } | { id, type: "result", result } | { id, type: "error", code, message }
+};
+worker.postMessage({ id: 1, type: "open", payload: { blob: file } });            // result: ecw.info
+worker.postMessage({ id: 2, type: "readRegion", payload: { x: 0, y: 0, width: 4096, height: 4096, outWidth: 1024, outHeight: 1024 } });
+worker.postMessage({ id: 3, type: "readRegionToScratch", payload: { /* same options */ } }); // result: { scratchId, byteLength, ... }
+worker.postMessage({ id: 4, type: "abort", payload: { id: 2 } });                 // job 2 ends with error code ABORTED
+worker.postMessage({ id: 5, type: "close" });
+```
+
+The file is structured-cloned into the Worker without copying its bytes, and pixel buffers come back transferred. Read a scratch result on the main thread with `getScratchFile(scratchId)`.
 
 ## Errors
 

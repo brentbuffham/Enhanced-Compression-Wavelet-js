@@ -4,7 +4,8 @@
 	"description": "Zero-dependency JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, for the browser and Node.",
 	"type": "module",
 	"exports": {
-		".": "./src/index.js"
+		".": "./src/index.js",
+		"./worker": "./src/workers/ecwDecodeWorker.js"
 	},
 	"files": [
 		"src",
