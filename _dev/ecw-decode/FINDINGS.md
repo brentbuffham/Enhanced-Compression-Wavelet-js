@@ -32,6 +32,8 @@ Integers big-endian, doubles little-endian.
 | `0x39` | 16 bytes ASCII, NUL-padded | Datum name | likely |
 | `0x49` | 16 bytes ASCII, NUL-padded | Projection name | likely |
 
+- Georeferencing doubles are stored with a lost last bit or two (Sample A's cell size is one ULP off a round value). GDAL reports the tidied value; we return the raw double and the parity test allows 1e-9.
+
 ## ⭐ CRACKED: level table
 
 - Starts at `0x59`, `levelCount` records of 21 bytes: u8 level index, u32 BE width, u32 BE height, three u32 BE `a`, `b`, `c`.

@@ -54,6 +54,13 @@ npm test
 
 Tests use synthetic byte buffers, so they run anywhere. Tests against real ECW files look in a local `samples/` folder, which is gitignored, and skip if it's empty.
 
+### Running sample tests
+
+1. Put an `.ecw` file in `samples/`.
+2. Install QGIS (its Windows build includes GDAL with ECW read support).
+3. Build the reference set: `node _dev/ecw-decode/makeRefs.mjs samples/<file>.ecw`. Set `QGIS_BIN` if QGIS is not in `C:\Program Files\QGIS 4.2.3\bin`.
+4. Run `npm test`. The sample tests now run instead of skipping.
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE).
