@@ -16,6 +16,8 @@ import { STREAM_MODE } from "../format/EcwBlockFrame.js";
 var TAG_PLUS = 0;
 var TAG_MINUS = 1;
 var TAG_RUN = 2;
+// Guards recursion on corrupt input; real trees are far shallower
+var MAX_TREE_DEPTH = 2048;
 
 function bad(message) {
 	return new EcwError(ERROR_CODES.BAD_BLOCK, message);
@@ -64,7 +66,8 @@ function readTree(bytes) {
 	var nodes = 0;
 	function node(depth) {
 		if (p >= bytes.length) throw bad("mode-2 tree runs past the stream");
-		if (depth > 64 || ++nodes > expected) throw bad("mode-2 tree is larger than its node count");
+		if (depth > MAX_TREE_DEPTH) throw bad("mode-2 tree is deeper than " + MAX_TREE_DEPTH);
+		if (++nodes > expected) throw bad("mode-2 tree is larger than its node count");
 		var t = bytes[p++];
 		if (t === 0x00) return { left: node(depth + 1), right: node(depth + 1) };
 		if (t === 0x80) {

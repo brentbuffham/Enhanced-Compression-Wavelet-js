@@ -80,3 +80,11 @@ test("decodeStream: mode 5 is all zeros, others dispatch", function () {
 	assert.deepEqual(Array.from(decodeStream({ mode: 6, bytes: words([0x0007]) }, 1)), [7]);
 	assert.deepEqual(Array.from(decodeStream({ mode: 2, bytes: encodeMode2([minus(4)]) }, 1)), [-4]);
 });
+
+test("mode 2: deep trees (300 distinct symbols) decode", function () {
+	var seq = [];
+	for (var i = 1; i <= 300; i++) seq.push(plus(i));
+	var out = decodeMode2(encodeMode2(seq), 300);
+	assert.equal(out[0], 1);
+	assert.equal(out[299], 300);
+});
