@@ -148,6 +148,7 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Steps on the way: "all three empty → exact" (168 left), then "the exact path ignores neighbours' details too" (77 left), then the per-subband rule (0 left).
 - Sample A: 0 differing pixels of 11,157,750 across levels 1–5 and the full-resolution crops. The sample test now demands exact equality.
 - Sample B (a second private file from a different encoding run: higher compression target, dequantisation steps that are not powers of two): 0 differing pixels of 15,631,387 on its first run, with no decoder changes.
+- Sample C (a small file from another source: geographic coordinates, compression target 25, two level records, steps up to 25/75/75): 0 differing pixels on its first run, including the whole image at full resolution.
 - Ruled out on the way: next / both / either block rules; per-block (all bands) emptiness; eighth storage on one path only; truncating instead of flooring the eighths (31,890 mismatches).
 
 ## History (resolved): what was left at deeper levels

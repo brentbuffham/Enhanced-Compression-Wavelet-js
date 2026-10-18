@@ -6,7 +6,7 @@ A plain description of the ERDAS ECW (Enhanced Compression Wavelet) version 2 ra
 
 Everything here comes from the bytes of real ECW files and from comparing decoded output with what GDAL produces through the ECW SDK, used purely as a black box. Some rules were found by writing small ECW files with chosen coefficients and watching how the SDK decodes them. No ECW SDK source code (libecw or Hexagon) was read, copied or translated.
 
-**Confidence.** Each rule below reproduces the SDK's output bit for bit on two independent RGB files from different encoding runs: about 27 million pixels across every overview level and full-resolution crops, with no differences. Both files are 3-band, 64×64-block, version 2. Greyscale and other band counts, other block sizes and ECW version 3 haven't been seen yet. Fields still not understood are listed under [Unknowns](#unknowns).
+**Confidence.** Each rule below reproduces the SDK's output bit for bit on three independent RGB files: two large orthophotos from different encoding runs and a small image from another source, in projected and geographic coordinates, at compression targets from 8 to 25. That's about 28 million pixels across every overview level and full-resolution crops, with no differences. All three files are 3-band, 64×64-block, version 2. Greyscale and other band counts, other block sizes and ECW version 3 haven't been seen yet. Fields still not understood are listed under [Unknowns](#unknowns).
 
 ## Conventions
 
