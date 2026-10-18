@@ -24,3 +24,4 @@ export { decodeStream } from "./codec/streams.js";
 export { synthesizeWindow } from "./codec/wavelet.js";
 export { yuvToRgba } from "./codec/colour.js";
 export { BlockCache, CACHE_DIR, fileFingerprint, blockCacheUsage, clearBlockCache } from "./cache/BlockCache.js";
+export { applyStretch, stretchFromPixels } from "./post/stretch.js";

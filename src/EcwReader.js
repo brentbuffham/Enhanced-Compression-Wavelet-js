@@ -20,6 +20,7 @@ import { sampleWindow } from "./decode/sampleWindow.js";
 import { yuvToRgba, greyToRgba } from "./codec/colour.js";
 import { applyTransparency } from "./post/applyTransparency.js";
 import { clipToPolygon } from "./post/clipToPolygon.js";
+import { applyStretch, stretchFromPixels } from "./post/stretch.js";
 import { openScratchSyncWriter, openScratchReader, removeScratchFile } from "./io/ScratchBinaryFile.js";
 import { BlockCache, fileFingerprint } from "./cache/BlockCache.js";
 
@@ -79,10 +80,12 @@ function isCount(v) {
  * Decode a region to RGBA.
  * @param {{x:number, y:number, width:number, height:number, outWidth?:number, outHeight?:number,
  *   resample?:"nearest"|"average", transparentBelow?:number, clipPolygon?:Array,
+ *   stretch?:{min:number[], max:number[]},
  *   onProgress?:function(number, string), signal?:AbortSignal, maxOutputBytes?:number}} opts
  *   x, y, width, height are full-resolution pixels; outWidth/outHeight default to width/height.
  *   resample "nearest" (default) matches GDAL / the ECW SDK exactly; "average" box-averages
  *   the decoded level for smooth downsampling between levels.
+ *   stretch (optional, e.g. from computeStretch) maps each band's min..max to 0..255.
  * @returns {Promise<{data:Uint8ClampedArray, width:number, height:number, level:number,
  *   bounds:{minX:number, minY:number, maxX:number, maxY:number}}>}
  */
@@ -111,6 +114,7 @@ EcwReader.prototype._plan = function (opts) {
 	if (!isCount(outW) || !isCount(outH)) throw invalid("outWidth and outHeight must be integers > 0");
 	var resample = o.resample === undefined ? "nearest" : o.resample;
 	if (resample !== "nearest" && resample !== "average") throw invalid("resample must be \"nearest\" or \"average\"");
+	if (o.stretch !== undefined) applyStretch(new Uint8ClampedArray(0), o.stretch);
 	if (o.signal && o.signal.aborted) throw new EcwError(ERROR_CODES.ABORTED, "decode aborted");
 	// Coarsest level still at least as sharp as the output
 	var factor = Math.min(o.width / outW, o.height / outH);
@@ -157,8 +161,28 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	if (h.bands >= 3) yuvToRgba(sampled[0], sampled[1], sampled[2], data);
 	else greyToRgba(sampled[0], data);
 	if (o.transparentBelow !== undefined) applyTransparency(data, o.transparentBelow);
+	if (o.stretch !== undefined) applyStretch(data, o.stretch);
 	if (o.clipPolygon) clipToPolygon(data, outW, plan.outH, plan.bounds, o.clipPolygon, oy0);
 	return data;
+};
+
+/**
+ * A contrast stretch for this file, like QGIS's min/max stretch with a
+ * cumulative count cut: per-band cut points of a small overview, leaving
+ * out the near-black background. Pass the result as readRegion's stretch
+ * so every read of the file looks the same.
+ * @param {{cut?:number[], ignoreBelow?:number, sampleSize?:number}} [opts]
+ *   cut in percent (default [2, 98]); ignoreBelow default 3; sampleSize is the
+ *   overview's longest side (default 512).
+ * @returns {Promise<{min:number[], max:number[]}>}
+ */
+EcwReader.prototype.computeStretch = async function (opts) {
+	var o = opts || {};
+	var h = this._header;
+	var fit = Math.min(1, (o.sampleSize || 512) / Math.max(h.width, h.height));
+	var thumb = await this.readRegion({ x: 0, y: 0, width: h.width, height: h.height,
+		outWidth: Math.max(1, Math.round(h.width * fit)), outHeight: Math.max(1, Math.round(h.height * fit)) });
+	return stretchFromPixels(thumb.data, { cut: o.cut, ignoreBelow: o.ignoreBelow });
 };
 
 /** Parse the block index lazily from the header window. */

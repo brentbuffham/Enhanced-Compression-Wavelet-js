@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openEcw } from "../src/EcwReader.js";
 import { buildCodedFile } from "./helpers/buildCodedFile.js";
+import { applyStretch, stretchFromPixels } from "../src/post/stretch.js";
 
 // 64x48, 3 levels, 4x4 blocks; constant luma unless a coefficient function is given
 function file(coeff) {
@@ -103,4 +104,24 @@ test("an aborted signal rejects with ABORTED", async function () {
 	var c = new AbortController();
 	c.abort();
 	await assert.rejects(ecw.readRegion({ x: 0, y: 0, width: 64, height: 48, signal: c.signal }), { code: "ABORTED" });
+});
+
+test("stretch is applied after colour, transparency is judged on the original values", async function () {
+	var ecw = await openEcw(file(function (r, b, sb, x) { return r === 0 && b === 0 && sb === "LL" ? 10 * x : 0; }));
+	var s = { min: [0, 0, 0], max: [80, 80, 80] };
+	var plain = await ecw.readRegion({ x: 0, y: 0, width: 64, height: 48 });
+	var stretched = await ecw.readRegion({ x: 0, y: 0, width: 64, height: 48, stretch: s });
+	assert.deepEqual(Array.from(stretched.data), Array.from(applyStretch(plain.data.slice(), s)));
+	var both = await ecw.readRegion({ x: 0, y: 0, width: 64, height: 48, stretch: s, transparentBelow: 1 });
+	assert.equal(pixel(both, 0, 0)[3], 0, "near-black background still transparent");
+	assert.equal(pixel(both, 63, 0)[3], 255);
+	await assert.rejects(ecw.readRegion({ x: 0, y: 0, width: 8, height: 8, stretch: { min: [9, 9, 9], max: [1, 1, 1] } }), { code: "INVALID_ARGUMENT" });
+});
+
+test("computeStretch takes the cumulative cut from a small overview", async function () {
+	var ecw = await openEcw(file(function (r, b, sb, x, y) { return r === 0 && sb === "LL" ? [40 + 9 * x + 3 * y, 6, -4][b] : 0; }));
+	var s = await ecw.computeStretch({ cut: [2, 98], sampleSize: 16 });
+	var thumb = await ecw.readRegion({ x: 0, y: 0, width: 64, height: 48, outWidth: 16, outHeight: 12 });
+	assert.deepEqual(s, stretchFromPixels(thumb.data, { cut: [2, 98], ignoreBelow: 3 }));
+	assert.ok(s.max[1] > s.min[1]);
 });

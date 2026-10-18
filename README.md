@@ -65,6 +65,25 @@ var img = await ecw.readRegion({
 await ecw.close(); // also deletes this reader's scratch files
 ```
 
+## Showing it on screen
+
+The pixels match GDAL exactly, but two things change how they look next to QGIS:
+
+- **Resampling.** `resample: "nearest"` (the default) is what QGIS and GDAL do and looks crisp. `"average"` is smoother and softer. Ask for the size you'll draw at, and draw it pixel for pixel: scaling the result again on a canvas blurs it.
+- **Colour on wide-gamut screens.** Browsers colour-manage canvas pixels as sRGB, so on a Display P3 monitor they look duller than in QGIS, which sends the raw values to the screen. To match QGIS, tag the pixels as Display P3 so the browser leaves them alone:
+
+```js
+var ctx = canvas.getContext("2d", { colorSpace: "display-p3" });
+ctx.putImageData(new ImageData(img.data, img.width, img.height, { colorSpace: "display-p3" }), 0, 0);
+```
+
+Imagery stored with low contrast can also be stretched, the way QGIS's min/max stretch does. It's off by default; compute it once per file so every read matches:
+
+```js
+var stretch = await ecw.computeStretch({ cut: [2, 98] }); // { min: [r, g, b], max: [r, g, b] }
+var img = await ecw.readRegion({ x, y, width, height, stretch });
+```
+
 ## Outputs bigger than memory
 
 `readRegion` refuses outputs above `maxOutputBytes` (512 MB by default) with `OUTPUT_TOO_LARGE`. For those, `readRegionToScratch` takes the same options, decodes in strips and streams the RGBA rows into a scratch file in the browser's Origin Private File System (OPFS). It needs synchronous OPFS access, so call it from a Worker.
