@@ -177,3 +177,30 @@ test("a band whose detail streams are all empty in a block takes the exact path"
 		assert.equal(got.bands[b][y * 64 + x], expected[b].data[y * expected[b].stride + x], "band " + b + " at " + x + "," + y);
 	}
 });
+
+test("intermediate levels are stored at eighths; the requested level is not", async function () {
+	// LL only: every block takes the exact path, so only the stored precision matters
+	var o = { width: 64, height: 64, levelCount: 3, coeff: function (r, b, sb, x, y) { return r === 0 && sb === "LL" ? 20 + (((x * 7919) ^ (y * 104729) ^ (b * 31)) % 199) : 0; } };
+	var built = buildCodedFile(o);
+	function reference(band, upTo) {
+		var img = null, w = 0;
+		for (var r = 0; r < upTo; r++) {
+			var lv = built.levels[r];
+			var p = { w: lv.width, h: lv.height, x0: 0, y0: 0, width: lv.width, height: lv.height, floorAt: function () { return false; } };
+			["LL", "LH", "HL", "HH"].forEach(function (sb) {
+				p[sb] = new Float32Array(lv.width * lv.height);
+				for (var y = 0; y < lv.height; y++) for (var x = 0; x < lv.width; x++) p[sb][y * lv.width + x] = sb === "LL" ? (r === 0 ? o.coeff(0, band, "LL", x, y) : img[y * (2 * w) + x]) : 0;
+			});
+			img = synthesizeWindow(p, 0, 0, 2 * lv.width, 2 * lv.height);
+			w = lv.width;
+			// every level that feeds another synthesis is stored floored to 1/8
+			if (r < upTo - 1) for (var q = 0; q < img.length; q++) img[q] = Math.floor(img[q] * 8) / 8;
+		}
+		return { data: img, stride: 2 * w };
+	}
+	var top = await decodeWindow(contextFor(built.bytes).ctx, 3, 0, 0, 64, 64);
+	var mid = await decodeWindow(contextFor(built.bytes).ctx, 2, 0, 0, 32, 32);
+	var refTop = reference(0, 3), refMid = reference(0, 2);
+	for (var y = 0; y < 64; y++) for (var x = 0; x < 64; x++) assert.equal(top.bands[0][y * 64 + x], refTop.data[y * refTop.stride + x], "level 3 at " + x + "," + y);
+	for (y = 0; y < 32; y++) for (x = 0; x < 32; x++) assert.equal(mid.bands[0][y * 32 + x], refMid.data[y * refMid.stride + x], "level 2 at " + x + "," + y);
+});

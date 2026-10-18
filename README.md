@@ -5,7 +5,7 @@ A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, p
 **Status: work in progress.** Nothing is published to npm yet and the API may change.
 
 - Working: `openEcw` reads the header, georeferencing and levels, and `readRegion` decodes imagery at any resolution.
-- Accuracy: output is within a few grey levels of the ECW SDK (via GDAL). Exact parity is still being worked out.
+- Accuracy: matches the ECW SDK (via GDAL) pixel for pixel at full resolution on the test data; at reduced-resolution overviews about 1 pixel in 70,000 differs, by 1–2 grey levels, near block edges.
 - Not yet: `readRegionToScratch` (large outputs to OPFS), a Worker entry point, and writing ECW.
 
 ## Demo

@@ -1,8 +1,9 @@
 // test/samples/readRegion.sample.test.js
 //==========================================================
 // readRegion against the GDAL reference set on the private sample.
-// Current state (FINDINGS.md): levels 1-2 exact, levels 3-5 ~99.6-97.6%,
-// full resolution ~84%; every value within 3. Guard: max 3, >= 80% exact.
+// Current state (FINDINGS.md): 168 of 11.2 M pixels differ (0.0015%), all
+// at overview levels 3-5 near block edges; full resolution exact.
+// Guard: max 2, >= 99.99% exact.
 // Level-0 reference is skipped: GDAL's coarsest overview is the level-1
 // reconstruction sampled at even pixels, not record 0's LL.
 // Skips without samples. Run with: node --test test/samples/readRegion.sample.test.js
@@ -19,8 +20,8 @@ import { findSample } from "../helpers/samples.js";
 var sample = findSample();
 var manifestPath = sample && join(sample.refDir, "manifest.json");
 var skip = sample && existsSync(manifestPath) ? false : "no samples/ref/manifest.json";
-var MAX_ERROR = 3;
-var MIN_EXACT = 0.80;
+var MAX_ERROR = 2;
+var MIN_EXACT = 0.9999;
 
 function compare(img, ref) {
 	var exact = 0, max = 0, n = 0;

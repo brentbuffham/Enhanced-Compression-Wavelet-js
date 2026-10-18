@@ -108,3 +108,15 @@ test("floorAt(c, k) false switches a coefficient to the exact path", function ()
 	var out = synthesizeWindow(p, 0, 0, 2, 4);
 	assert.deepEqual(Array.from(out), [10.125, 10.125, 10.1875, 10.1875, 10.25, 10.25, 10.25, 10.25]);
 });
+
+test("the output pixel's block decides the path for both columns it interpolates", function () {
+	var p = planes(2, 2);
+	// column 0 rows 10.125 / 10.25, column 1 rows 20.125 / 20.25
+	p.LL[0] = 10.125; p.LL[1] = 20.125; p.LL[2] = 10.25; p.LL[3] = 20.25;
+	p.floorAt = function (c) { return c === 0; };
+	var out = synthesizeWindow(p, 0, 0, 4, 4);
+	// row 1, x 1 sits in column 0's block (general): (floor4(10.1875) + floor4(20.1875)) / 2 = (10 + 20) / 2
+	assert.equal(out[1 * 4 + 1], 15);
+	// row 1, x 3 sits in column 1's block (exact): (20.1875 + 20.1875) / 2
+	assert.equal(out[1 * 4 + 3], 20.1875);
+});

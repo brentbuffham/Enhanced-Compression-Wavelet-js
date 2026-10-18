@@ -93,7 +93,7 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 		var sv = function (k) { return sPlane[(clamp(k, h) - src.y0) * src.width + col]; };
 		var dv = function (k) { return dPlane[(clamp(k, h) - src.y0) * src.width + col]; };
 		var column = c;
-		var rounding = src.floorAt ? function (avg, k) { return src.floorAt(column, k) ? quarterFloor(avg) : avg; } : quarterFloor;
+		var rounding = quarterFloor;
 		sPlane = src.LL; dPlane = src.LH;
 		synth1d(sv, dv, h, y0, y1, lo, cols, c - need.x0, null);
 		synth1d(sv, dv, h, y0, y1, loQ, cols, c - need.x0, rounding);
@@ -111,11 +111,15 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 		var H = function (k) { return hi[base + clamp(k, w)]; };
 		var LQ = oddRow ? function (k) { return loQ[base + clamp(k, w)]; } : L;
 		var HQ = oddRow ? function (k) { return hiQ[base + clamp(k, w)]; } : H;
+		var ky = (y0 + r) >> 1;
 		for (var x = x0; x < x1; x++) {
 			var kx = x >> 1;
+			// the block holding this output pixel decides general (floored) or exact path
+			var general = !src.floorAt || src.floorAt(kx, ky);
+			var lq = general ? LQ : L, hq = general ? HQ : H;
 			out[r * outW + x - x0] = (x & 1) === 0
 				? L(kx) - (H(clamp(kx - 1, w)) + H(kx)) / 2
-				: (LQ(kx) + LQ(clamp(kx + 1, w))) / 2 + HQ(kx);
+				: (lq(kx) + lq(clamp(kx + 1, w))) / 2 + hq(kx);
 		}
 	}
 	return out;

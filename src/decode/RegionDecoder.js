@@ -14,6 +14,8 @@
 // Where a band's three detail streams in a block are all empty, the
 // SDK synthesises that band's block on an exact path; elsewhere it
 // floors vertical averages to quarters (wavelet floorAt).
+// Every level that feeds another synthesis is stored floored to eighths,
+// as the SDK does; the requested level keeps full precision.
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
@@ -150,7 +152,18 @@ function dequantise(details, record) {
  * Reconstruct window [x0, x1) x [y0, y1) of image level j.
  * @returns {Promise<{width:number, height:number, bands:Float32Array[]}>}
  */
-export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
+export function decodeWindow(ctx, j, x0, y0, x1, y1) {
+	return decodeLevel(ctx, j, x0, y0, x1, y1, true);
+}
+
+// Levels used as the next level's LL are stored at eighths
+function storeIntermediate(bands) {
+	bands.forEach(function (arr) {
+		for (var i = 0; i < arr.length; i++) arr[i] = Math.floor(arr[i] * 8) / 8;
+	});
+}
+
+async function decodeLevel(ctx, j, x0, y0, x1, y1, requested) {
 	var h = ctx.header;
 	if (!Number.isInteger(j) || j < 0 || j > h.levelCount) {
 		throw new EcwError(ERROR_CODES.INVALID_ARGUMENT, "no image level " + j);
@@ -168,7 +181,7 @@ export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
 	var record = j - 1;
 	var lv = ctx.levels[record];
 	var c = requiredCoefficientWindow(lv.width, lv.height, x0, y0, x1, y1);
-	var low = await decodeWindow(ctx, record, c.x0, c.y0, c.x1, c.y1);
+	var low = await decodeLevel(ctx, record, c.x0, c.y0, c.x1, c.y1, false);
 	var details = await readCoefficients(ctx, record, ["LH", "HL", "HH"], c.x0, c.y0, c.x1, c.y1);
 	dequantise(details, lv);
 	// Step 2) Synthesise each band
@@ -180,6 +193,7 @@ export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
 			floorAt: floorAtFor(ctx, record, b)
 		}, x0, y0, x1, y1));
 	}
+	if (!requested) storeIntermediate(bands);
 	return { width: x1 - x0, height: y1 - y0, bands: bands };
 }
 
