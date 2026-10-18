@@ -65,8 +65,10 @@ function synth1d(s, d, len, o0, o1, out, outStride, outOffset, roundAverage) {
  *   LL:Float32Array, LH:Float32Array, HL:Float32Array, HH:Float32Array}} src
  *   Coefficient window: plane values for coefficient columns [x0, x0+width)
  *   and rows [y0, y0+height); it must cover requiredCoefficientWindow().
- *   Optional src.floorAt(c, k) -> false puts coefficient column c, row k on the
- *   exact path (the SDK does this where a band's detail streams are empty).
+ *   Optional src.floorAt(kx, ky) -> false puts the output pixels of coefficient
+ *   (kx, ky) on the exact path: pure LL interpolation that ignores every detail
+ *   coefficient, neighbours' included (the SDK does this where a band's detail
+ *   streams in the block are all empty).
  * @returns {Float32Array} (x1 - x0) * (y1 - y0) samples, row-major
  */
 export function synthesizeWindow(src, x0, y0, x1, y1) {
@@ -85,6 +87,9 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 	var hi = new Float32Array(cols * outH);
 	var loQ = new Float32Array(cols * outH);
 	var hiQ = new Float32Array(cols * outH);
+	// lo0: LL-only vertical interpolation (exact path ignores every detail coefficient)
+	var lo0 = src.floorAt ? new Float32Array(cols * outH) : null;
+	var zero = function () { return 0; };
 
 	// Step 1) Column pass for every needed coefficient column
 	for (var c = need.x0; c < need.x1; c++) {
@@ -97,6 +102,7 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 		sPlane = src.LL; dPlane = src.LH;
 		synth1d(sv, dv, h, y0, y1, lo, cols, c - need.x0, null);
 		synth1d(sv, dv, h, y0, y1, loQ, cols, c - need.x0, rounding);
+		if (lo0) synth1d(sv, zero, h, y0, y1, lo0, cols, c - need.x0, null);
 		sPlane = src.HL; dPlane = src.HH;
 		synth1d(sv, dv, h, y0, y1, hi, cols, c - need.x0, null);
 		synth1d(sv, dv, h, y0, y1, hiQ, cols, c - need.x0, rounding);
@@ -114,12 +120,17 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 		var ky = (y0 + r) >> 1;
 		for (var x = x0; x < x1; x++) {
 			var kx = x >> 1;
-			// the block holding this output pixel decides general (floored) or exact path
-			var general = !src.floorAt || src.floorAt(kx, ky);
-			var lq = general ? LQ : L, hq = general ? HQ : H;
+			// the block holding this output pixel decides the path: general (details,
+			// odd-odd floored) or exact (pure LL interpolation, no detail coefficients at all)
+			if (src.floorAt && !src.floorAt(kx, ky)) {
+				out[r * outW + x - x0] = (x & 1) === 0
+					? lo0[base + kx]
+					: (lo0[base + kx] + lo0[base + clamp(kx + 1, w)]) / 2;
+				continue;
+			}
 			out[r * outW + x - x0] = (x & 1) === 0
 				? L(kx) - (H(clamp(kx - 1, w)) + H(kx)) / 2
-				: (lq(kx) + lq(clamp(kx + 1, w))) / 2 + hq(kx);
+				: (LQ(kx) + LQ(clamp(kx + 1, w))) / 2 + HQ(kx);
 		}
 	}
 	return out;

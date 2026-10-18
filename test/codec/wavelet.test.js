@@ -120,3 +120,13 @@ test("the output pixel's block decides the path for both columns it interpolates
 	// row 1, x 3 sits in column 1's block (exact): (20.1875 + 20.1875) / 2
 	assert.equal(out[1 * 4 + 3], 20.1875);
 });
+
+test("exact-path pixels ignore all detail coefficients, including neighbouring blocks'", function () {
+	var p = planes(2, 1);
+	p.LL[0] = 10; p.LL[1] = 20; p.HL[0] = 4;
+	p.floorAt = function (c) { return c === 0; };
+	var out = synthesizeWindow(p, 0, 0, 4, 1);
+	// x0, x1 in column 0's block (general): 10 - (4 + 4) / 2 = 6; (10 + 20) / 2 + 4 = 19
+	// x2, x3 in column 1's block (exact): pure LL interpolation, the neighbour's HL is not used: 20; 20
+	assert.deepEqual(Array.from(out), [6, 19, 20, 20]);
+});
