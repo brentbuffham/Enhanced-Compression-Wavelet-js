@@ -5,7 +5,9 @@
 // an image of 2w x 2h. 1-D rule, indices clamped to [0, len):
 //   even x[2k]   = s[k] - (d[k-1] + d[k]) / 2
 //   odd  x[2k+1] = (s[k] + s[k+1]) / 2 + d[k]
-// Rows first (LL with HL; LH with HH), then columns (low, high).
+// Columns first (LL with LH; HL with HH), odd-row averages floored to
+// quarters, then rows exactly: matches the ECW SDK's general path
+// (FINDINGS.md "synthesis rounding").
 // Only a window is produced, from a coefficient window padded by one
 // (requiredCoefficientWindow), so huge levels never load whole.
 //==========================================================
@@ -31,19 +33,32 @@ function clamp(i, n) {
 	return i < 0 ? 0 : i >= n ? n - 1 : i;
 }
 
-// 1-D synthesis of output samples [o0, o1) into out; s(k) / d(k) take clamped global indices
-function synth1d(s, d, len, o0, o1, out, outStride, outOffset) {
+// The SDK holds the vertical pass's averaged samples to quarter
+// precision (floor), then runs the horizontal pass exactly
+function quarterFloor(v) {
+	return Math.floor(v * 4) / 4;
+}
+
+// 1-D synthesis of output samples [o0, o1) into out; s(k) / d(k) take clamped global indices.
+// roundAverage, when set, is applied to the odd samples' (s[k] + s[k+1]) / 2 term.
+function synth1d(s, d, len, o0, o1, out, outStride, outOffset, roundAverage) {
 	for (var i = o0; i < o1; i++) {
 		var k = i >> 1;
-		var v = (i & 1) === 0
-			? s(k) - (d(clamp(k - 1, len)) + d(k)) / 2
-			: (s(k) + s(clamp(k + 1, len))) / 2 + d(k);
+		var v;
+		if ((i & 1) === 0) {
+			v = s(k) - (d(clamp(k - 1, len)) + d(k)) / 2;
+		} else {
+			var avg = (s(k) + s(clamp(k + 1, len))) / 2;
+			v = (roundAverage ? roundAverage(avg) : avg) + d(k);
+		}
 		out[outOffset + (i - o0) * outStride] = v;
 	}
 }
 
 /**
  * Synthesise output window [x0, x1) x [y0, y1) of the 2w x 2h image.
+ * Columns first (LL with LH, HL with HH; odd-row averages floored to
+ * quarters, as the ECW SDK does), then rows (exact).
  * @param {{w:number, h:number, x0:number, y0:number, width:number, height:number,
  *   LL:Float32Array, LH:Float32Array, HL:Float32Array, HH:Float32Array}} src
  *   Coefficient window: plane values for coefficient columns [x0, x0+width)
@@ -57,36 +72,33 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 	}
 	var outW = x1 - x0;
 	var outH = y1 - y0;
-	var rows = need.y1 - need.y0;
-	var lo = new Float32Array(outW * rows);
-	var hi = new Float32Array(outW * rows);
-	var cx = 0;
-	var rowBase = 0;
-	var plane = null;
+	var cols = need.x1 - need.x0;
 	var w = src.w;
-	function at(k) { return plane[rowBase + clamp(k, w) - src.x0]; }
-	var sPlane, dPlane;
-	function sx(k) { plane = sPlane; return at(k); }
-	function dx(k) { plane = dPlane; return at(k); }
+	var h = src.h;
+	// lo[y][c] / hi[y][c]: vertical synthesis of coefficient column c at output row y
+	var lo = new Float32Array(cols * outH);
+	var hi = new Float32Array(cols * outH);
 
-	// Step 1) Row pass for every needed coefficient row
-	for (var r = need.y0; r < need.y1; r++) {
-		rowBase = (r - src.y0) * src.width;
-		sPlane = src.LL; dPlane = src.HL;
-		synth1d(sx, dx, w, x0, x1, lo, 1, (r - need.y0) * outW);
-		sPlane = src.LH; dPlane = src.HH;
-		synth1d(sx, dx, w, x0, x1, hi, 1, (r - need.y0) * outW);
+	// Step 1) Column pass for every needed coefficient column
+	for (var c = need.x0; c < need.x1; c++) {
+		var col = c - src.x0;
+		var sPlane, dPlane;
+		var sv = function (k) { return sPlane[(clamp(k, h) - src.y0) * src.width + col]; };
+		var dv = function (k) { return dPlane[(clamp(k, h) - src.y0) * src.width + col]; };
+		sPlane = src.LL; dPlane = src.LH;
+		synth1d(sv, dv, h, y0, y1, lo, cols, c - need.x0, quarterFloor);
+		sPlane = src.HL; dPlane = src.HH;
+		synth1d(sv, dv, h, y0, y1, hi, cols, c - need.x0, quarterFloor);
 	}
 
-	// Step 2) Column pass
+	// Step 2) Row pass
 	var out = new Float32Array(outW * outH);
-	var h = src.h;
-	for (cx = 0; cx < outW; cx++) {
-		var col = cx;
+	for (var r = 0; r < outH; r++) {
+		var base = r * cols - need.x0;
 		synth1d(
-			function (k) { return lo[(clamp(k, h) - need.y0) * outW + col]; },
-			function (k) { return hi[(clamp(k, h) - need.y0) * outW + col]; },
-			h, y0, y1, out, outW, cx
+			function (k) { return lo[base + clamp(k, w)]; },
+			function (k) { return hi[base + clamp(k, w)]; },
+			w, x0, x1, out, 1, r * outW, null
 		);
 	}
 	return out;
