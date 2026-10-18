@@ -1,7 +1,10 @@
 // src/codec/colour.js
 //==========================================================
-// Band 0 is luma, bands 1 and 2 are Cb- and Cr-like chroma. The ECW
-// SDK converts exactly like this (FINDINGS.md "colour conversion",
+// Files in the "yuv" colour space (header byte 0x03 = 2, what GDAL calls
+// RGB) store luma and chroma: band 0 is luma, bands 1 and 2 are Cb- and
+// Cr-like chroma. Every other colour space passes its bands straight
+// through (bandsToRgba / greyToRgba). The ECW SDK converts yuv exactly
+// like this (FINDINGS.md "colour conversion",
 // recovered by having the SDK decode crafted files):
 //   1) floor Y, Cb and Cr to integers
 //   2) R = Y + T_R(Cr), G = Y + T_GB(Cb) + T_GR(Cr), B = Y + T_B(Cb)
@@ -47,6 +50,23 @@ export function yuvToRgba(Y, U, V, rgba) {
 		rgba[o] = clamp(y + tR(v));
 		rgba[o + 1] = clamp(y + tGB(u) + tGR(v));
 		rgba[o + 2] = clamp(y + tB(u));
+		rgba[o + 3] = 255;
+	}
+}
+
+/**
+ * Pass three bands straight through to RGBA, floored and clamped (colour
+ * spaces other than yuv: rgb, multiband, none, ycbcr, as the SDK does).
+ * @param {Float32Array} R
+ * @param {Float32Array} G
+ * @param {Float32Array} B
+ * @param {Uint8ClampedArray} rgba
+ */
+export function bandsToRgba(R, G, B, rgba) {
+	for (var i = 0, o = 0; i < R.length; i++, o += 4) {
+		rgba[o] = clamp(Math.floor(R[i]));
+		rgba[o + 1] = clamp(Math.floor(G[i]));
+		rgba[o + 2] = clamp(Math.floor(B[i]));
 		rgba[o + 3] = 255;
 	}
 }

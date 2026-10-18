@@ -6,7 +6,7 @@ A plain description of the ERDAS ECW (Enhanced Compression Wavelet) version 2 ra
 
 Everything here comes from the bytes of real ECW files and from comparing decoded output with what GDAL produces through the ECW SDK, used purely as a black box. Some rules were found by writing small ECW files with chosen coefficients and watching how the SDK decodes them. No ECW SDK source code (libecw or Hexagon) was read, copied or translated.
 
-**Confidence.** Each rule below reproduces the SDK's output bit for bit on three independent RGB files: two large orthophotos from different encoding runs and a small image from another source, in projected and geographic coordinates, at compression targets from 8 to 25. That's about 28 million pixels across every overview level and full-resolution crops, with no differences. All three files are 3-band, 64×64-block, version 2. Greyscale and other band counts, other block sizes and ECW version 3 haven't been seen yet. Fields still not understood are listed under [Unknowns](#unknowns).
+**Confidence.** Each rule below reproduces the SDK's output bit for bit on three independent RGB files: two large orthophotos from different encoding runs and a small image from another source, in projected and geographic coordinates, at compression targets from 8 to 25. That's about 28 million pixels across every overview level and full-resolution crops, with no differences. All three are 3-band, 64×64-block, version 2. Greyscale, multiband and non-yuv colour spaces have been checked on constructed files only (written with chosen coefficients and decoded by the SDK; about 200,000 pixels, no differences). Other block sizes and ECW version 3 haven't been seen. Fields still not understood are listed under [Unknowns](#unknowns).
 
 ## Conventions
 
@@ -29,16 +29,17 @@ D      block data, one block after another
 |---|---|---|
 | `0x00` | u8 | Signature, `0x65` |
 | `0x01` | u8 | Format version, `2` |
-| `0x02` | 2 bytes | Unknown (`01 02` seen) |
+| `0x02` | u8 | Unknown (`1` seen) |
+| `0x03` | u8 | Colour space (see below) |
 | `0x04` | u8 | Number of level records `n` |
 | `0x05` | u8 | Unknown (`4` seen) |
 | `0x06` | u32 | Width in pixels |
 | `0x0A` | u32 | Height in pixels |
 | `0x0E` | u16 | Number of bands |
-| `0x10` | u16 | Unknown (`1` seen) |
+| `0x10` | u16 | Unknown (`1` seen; the SDK refuses `0`) |
 | `0x12` | u16 | Block width (64 seen) |
 | `0x14` | u16 | Block height (64 seen) |
-| `0x16` | u16 | Compression target ratio (what GDAL reports as `COMPRESSION_RATE_TARGET`) |
+| `0x16` | u16 | Compression target ratio (GDAL's `COMPRESSION_RATE_TARGET`, which GDAL documents as 100 / (100 − target percent)) |
 | `0x18` | u8 | Georeferencing present (`1` seen) |
 | `0x19` | f64 LE | Cell size X |
 | `0x21` | f64 LE | Cell size Y (negative for north-up) |
@@ -49,18 +50,33 @@ D      block data, one block after another
 
 The georeferencing doubles can sit one unit in the last place off a round number. GDAL shows the tidied value; `ecw-js` returns the stored one.
 
+Version 2 files hold 8 bits per channel (GDAL's ECW driver documentation says so; version 3 adds 16-bit).
+
+### Colour space
+
+Byte `0x03`, with the names GDAL reports for each value:
+
+| Value | Name | Bands hold |
+|---|---|---|
+| 0 | NONE | Values shown as stored |
+| 1 | GREYSCALE | One grey band |
+| 2 | YUV (GDAL reports "RGB") | Luma and two chroma bands, converted to RGB on decode (see [Colour](#colour)) |
+| 3 | MULTIBAND | Any number of bands, shown as stored |
+| 4 | RGB | Red, green and blue, shown as stored |
+| 5 | YCbCr | Shown as stored |
+
+All the real RGB files seen use 2. Only colour space 2 is colour-converted; every other one passes its bands through, floored and clamped to 0 to 255.
+
 ## Level table
 
-`n` records of 21 bytes starting at `0x59`, coarsest first:
+`n` records of 9 + 4 × bands bytes (21 for RGB) starting at `0x59`, coarsest first:
 
 | Offset | Type | Meaning |
 |---|---|---|
 | `+0` | u8 | Record index `k` |
 | `+1` | u32 | Record width |
 | `+5` | u32 | Record height |
-| `+9` | u32 | Step `a`: dequantisation step for band 0 |
-| `+13` | u32 | Step `b`: dequantisation step for band 1 |
-| `+17` | u32 | Step `c`: dequantisation step for band 2 |
+| `+9` | u32 × bands | One dequantisation step per band (for RGB: `a`, `b`, `c`) |
 
 - Record `k` of `n` is `ceil(W / 2^(n-k))` by `ceil(H / 2^(n-k))`. The finest record is half the full resolution; full resolution itself is not a record.
 - The steps are 1 for the coarse records and grow towards the finest ones (seen: `a` up to 8 or 9, `b` and `c` about three times `a`). They don't have to be powers of two.
@@ -128,10 +144,10 @@ Decode leaves until the block's coefficient count is reached; it always ends on 
 
 The image is rebuilt one level at a time with an inverse wavelet. For each band:
 
-- **Image level 0** is record 0's LL coefficients, used as stored.
-- **Image level j + 1** is synthesised from image level j (as LL) and record j's LH, HL and HH coefficients, each multiplied by that record's step for the band (`a`, `b` or `c`). The result is twice the size, cropped to record j + 1's size, or to the full image size for the last level.
+- **Image level 0** is record 0's LL coefficients multiplied by record 0's step for the band (1 in every real file seen).
+- **Image level j + 1** is synthesised from image level j (as LL) and record j's LH, HL and HH coefficients, each multiplied by that record's step for the band. The result is twice the size, cropped to record j + 1's size, or to the full image size for the last level.
 
-Band 0 is luma; bands 1 and 2 are chroma.
+In the YUV colour space, band 0 is luma and bands 1 and 2 are chroma.
 
 ### Synthesis
 
@@ -151,7 +167,7 @@ It runs over columns first (LL with LH, HL with HH), then over rows (the two col
 
 ### Colour
 
-For 3-band files, Y (band 0), Cb (band 1) and Cr (band 2) are each floored to an integer, then:
+For YUV files (colour space 2), Y (band 0), Cb (band 1) and Cr (band 2) are each floored to an integer, then:
 
 ```
 R = Y + T_R(Cr)
@@ -176,9 +192,9 @@ These are close to BT.601 but not equal, and the offsets mean all-zero data deco
 - GDAL doesn't list the coarsest stored level as an overview. Its coarsest overview is image level 1 sampled at even pixels.
 - Reading at reduced resolution, GDAL takes the nearest pixel of the next finer level.
 - ECW version 2 has no alpha band. Areas outside the imaged footprint are lossy near-black (values 0 to 2), not exact zeros.
+- By default GDAL presents every file north-up (negative Y cell size); its `ECW_ALWAYS_UPWARD` option exists for the rare file stored the other way.
 
 ## Unknowns
 
-- Header bytes `0x02`, `0x03`, `0x05` and `0x10`, and the block index flag byte at `E + 4`.
-- Whether a step applies to record 0's LL (every file seen has 1 there).
-- Files with other than 3 bands, other block sizes, and ECW version 3.
+- Header bytes `0x02`, `0x05` and `0x10`, and the block index flag byte at `E + 4`. Byte `0x05` must be 4 for the SDK to decode a 3-band file.
+- Real (not constructed) files with other than 3 bands, other block sizes, and ECW version 3.

@@ -9,8 +9,9 @@
 // a cone of blocks, never a whole level. Decoded blocks are cached on
 // the context, so each block is fetched and decoded once.
 // Detail coefficients are dequantised by the record's per-band step:
-// a (band 0), b (band 1), c (band 2) from the level table
-// (FINDINGS.md "quantisation steps"). LL is used as decoded.
+// one per band from the level table (a, b, c for RGB files)
+// (FINDINGS.md "quantisation steps"). Record 0's LL is scaled by its
+// steps too (crafted files; real files have 1 there).
 // A detail stream that is empty in a block drops that subband from
 // the block's output pixels, neighbours' coefficients included; with all
 // three empty the band takes the exact path (wavelet subbandsAt).
@@ -146,9 +147,10 @@ function subbandsAtFor(ctx, record, band) {
 
 // Multiply detail planes in place by the record's per-band step
 function dequantise(details, record) {
-	var steps = [record.a, record.b, record.c];
+	// one step per band (record.steps); a / b / c for records built without it
+	var steps = record.steps || [record.a, record.b, record.c];
 	details.forEach(function (planes, band) {
-		var step = steps[Math.min(band, 2)];
+		var step = steps[band] === undefined ? 1 : steps[band];
 		if (step === 1) return;
 		["LH", "HL", "HH"].forEach(function (sb) {
 			var a = planes[sb];
@@ -184,7 +186,13 @@ async function decodeLevel(ctx, j, x0, y0, x1, y1, requested) {
 	checkAbort(ctx);
 	if (j === 0) {
 		var ll = await readCoefficients(ctx, 0, ["LL"], x0, y0, x1, y1);
-		return { width: x1 - x0, height: y1 - y0, bands: ll.map(function (p) { return p.LL; }) };
+		// record 0's steps scale its LL as well (1 in every real file seen)
+		var steps0 = ctx.levels[0].steps || [ctx.levels[0].a, ctx.levels[0].b, ctx.levels[0].c];
+		return { width: x1 - x0, height: y1 - y0, bands: ll.map(function (p, band) {
+			var step = steps0[band] === undefined ? 1 : steps0[band];
+			if (step !== 1) for (var i = 0; i < p.LL.length; i++) p.LL[i] *= step;
+			return p.LL;
+		}) };
 	}
 	// tiles are already floored to eighths
 	var bands = ctx.tileCache

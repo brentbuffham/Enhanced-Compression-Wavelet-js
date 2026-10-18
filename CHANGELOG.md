@@ -6,7 +6,8 @@ First release. Reads ECW version 2 files in the browser and in Node, bit for bit
 
 **Reading**
 
-- `openEcw(fileOrBlob, options)` reads the header, georeferencing and resolution levels (`ecw.info`) without loading the file.
+- `openEcw(fileOrBlob, options)` reads the header, georeferencing, colour space and resolution levels (`ecw.info`) without loading the file.
+- Greyscale, RGB, multiband and the other ECW colour spaces: only the luma/chroma (YUV) space is colour-converted; the rest show their bands as stored (the first three, or one as grey).
 - `readRegion` decodes any pixel window at any output size. It picks the coarsest resolution level that is still sharp enough and decodes only the blocks the window needs.
 - `resample: "nearest"` (default, the same as GDAL and QGIS) or `"average"` (box-averaged, smoother).
 - Optional `transparentBelow` (near-black background becomes transparent), `clipPolygon` (map-coordinate rings, holes supported) and `stretch` (QGIS-style contrast stretch, with `ecw.computeStretch()`).
@@ -32,4 +33,4 @@ First release. Reads ECW version 2 files in the browser and in Node, bit for bit
 
 **Limits**
 
-- ECW version 2, read only. Tested on 3-band RGB files with 64×64 blocks; other band counts and ECW version 3 are untested.
+- ECW version 2, read only. Real files tested: 3-band RGB with 64×64 blocks. Greyscale, multiband and the other colour spaces are checked against the ECW SDK on constructed files; real files of those kinds, other block sizes and ECW version 3 are untested.

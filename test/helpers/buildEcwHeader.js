@@ -9,7 +9,7 @@ var DEFAULTS = {
 	signature: 0x65, version: 2, levelCount: 3, width: 1000, height: 600, bands: 3,
 	blockWidth: 64, blockHeight: 64, compressionTarget: 8, georefFlag: 1,
 	cellSizeX: 0.5, cellSizeY: -0.5, originX: 1000.25, originY: 5000.75,
-	datum: "WGS84", projection: "LOCAL"
+	datum: "WGS84", projection: "LOCAL", colorSpace: 2
 };
 
 function ceilLevels(width, height, count) {
@@ -25,19 +25,29 @@ function writeAscii(bytes, pos, text) {
 	for (var i = 0; i < text.length && i < 16; i++) bytes[pos + i] = text.charCodeAt(i);
 }
 
+// A level record's per-band steps: lv.steps, or a/b/c, padded with 1 to the band count
+function recordSteps(lv, bands) {
+	var steps = lv.steps || [lv.a, lv.b, lv.c];
+	var out = [];
+	for (var b = 0; b < bands; b++) out.push(steps[b] === undefined ? 1 : steps[b]);
+	return out;
+}
+
 /**
  * @param {object} overrides - Any DEFAULTS field, plus `levels` and `truncateAt`.
+ *   Level records are 9 + 4 x bands bytes (one step per band); colorSpace is byte 0x03.
  * @returns {Uint8Array}
  */
 export function buildEcwHeader(overrides) {
 	var f = Object.assign({}, DEFAULTS, overrides);
 	var levels = f.levels || ceilLevels(f.width, f.height, f.levelCount);
-	var bytes = new Uint8Array(0x59 + 21 * levels.length);
+	var recordLength = 9 + 4 * f.bands;
+	var bytes = new Uint8Array(0x59 + recordLength * levels.length);
 	var view = new DataView(bytes.buffer);
 	bytes[0x00] = f.signature;
 	bytes[0x01] = f.version;
 	bytes[0x02] = 0x01;
-	bytes[0x03] = 0x02;
+	bytes[0x03] = f.colorSpace;
 	bytes[0x04] = f.levelCount;
 	bytes[0x05] = 0x04;
 	view.setUint32(0x06, f.width, false);
@@ -55,13 +65,11 @@ export function buildEcwHeader(overrides) {
 	writeAscii(bytes, 0x39, f.datum);
 	writeAscii(bytes, 0x49, f.projection);
 	levels.forEach(function (lv, i) {
-		var p = 0x59 + 21 * i;
+		var p = 0x59 + recordLength * i;
 		bytes[p] = lv.level;
 		view.setUint32(p + 1, lv.width, false);
 		view.setUint32(p + 5, lv.height, false);
-		view.setUint32(p + 9, lv.a, false);
-		view.setUint32(p + 13, lv.b, false);
-		view.setUint32(p + 17, lv.c, false);
+		recordSteps(lv, f.bands).forEach(function (step, b) { view.setUint32(p + 9 + 4 * b, step, false); });
 	});
 	return typeof f.truncateAt === "number" ? bytes.slice(0, f.truncateAt) : bytes;
 }

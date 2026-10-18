@@ -57,6 +57,7 @@ function frame(streams) {
  *   steps?:function(number):{a:number,b:number,c:number},
  *   coeff:function(number, number, string, number, number):number, mode?:number}} o
  *   mode 2 writes Huffman streams (test encoder), default 6 writes run-length words.
+ *   colorSpace sets header byte 0x03; level records hold one step per band.
  * @returns {Uint8Array} ECW file bytes
  */
 export function craftEcw(o) {
@@ -82,7 +83,9 @@ export function craftEcw(o) {
 			blocks.push(frame(streams));
 		}
 	});
-	var tableEnd = 0x59 + 21 * levels.length;
+	// a level record is index, width, height, then one step per band (o.recordBytes overrides, for experiments)
+	var recordBytes = o.recordBytes || 9 + 4 * bands;
+	var tableEnd = 0x59 + recordBytes * levels.length;
 	var entries = blocks.length + 1;
 	var bodyLength = 1 + 8 * entries;
 	var dataLength = blocks.reduce(function (s, b) { return s + b.length; }, 0);
@@ -90,16 +93,18 @@ export function craftEcw(o) {
 	var view = new DataView(out.buffer);
 	out.set(template, 0);
 	out[0x04] = levels.length;
+	// colour space byte (2 = yuv, as in the template; 1 greyscale, 3 multiband, 4 rgb ...)
+	if (o.colorSpace !== undefined) out[0x03] = o.colorSpace;
 	view.setUint32(0x06, o.width, false);
 	view.setUint32(0x0A, o.height, false);
 	view.setUint16(0x0E, bands, false);
 	view.setUint16(0x12, block, false);
 	view.setUint16(0x14, block, false);
 	levels.forEach(function (lv, i) {
-		var p = 0x59 + 21 * i;
+		var p = 0x59 + recordBytes * i;
 		out[p] = i;
 		view.setUint32(p + 1, lv.width, false); view.setUint32(p + 5, lv.height, false);
-		view.setUint32(p + 9, lv.a, false); view.setUint32(p + 13, lv.b, false); view.setUint32(p + 17, lv.c, false);
+		[lv.a, lv.b, lv.c].slice(0, (recordBytes - 9) / 4).forEach(function (step, b) { view.setUint32(p + 9 + 4 * b, step, false); });
 	});
 	view.setUint32(tableEnd, bodyLength, false);
 	out[tableEnd + 4] = 1;

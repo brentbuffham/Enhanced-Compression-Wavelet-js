@@ -6,7 +6,7 @@
 /* prettier-ignore-file */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseHeader, HEADER_FIXED_LENGTH, LEVEL_RECORD_LENGTH, ECW_SIGNATURE } from "../../src/format/EcwHeader.js";
+import { parseHeader, HEADER_FIXED_LENGTH, ECW_SIGNATURE, levelRecordLength } from "../../src/format/EcwHeader.js";
 import { MemorySource } from "../../src/io/MemorySource.js";
 import { buildEcwHeader } from "../helpers/buildEcwHeader.js";
 
@@ -14,14 +14,25 @@ function parse(overrides) { return parseHeader(new MemorySource(buildEcwHeader(o
 
 test("constants", function () {
 	assert.equal(HEADER_FIXED_LENGTH, 0x59);
-	assert.equal(LEVEL_RECORD_LENGTH, 21);
+	assert.equal(levelRecordLength(3), 21);
+	assert.equal(levelRecordLength(1), 13);
 	assert.equal(ECW_SIGNATURE, 0x65);
 });
 
 test("parses every field of a synthetic header", function () {
 	assert.deepEqual(parse({}), { version: 2, levelCount: 3, width: 1000, height: 600, bands: 3, blockWidth: 64, blockHeight: 64,
 		compressionTarget: 8, hasGeoreference: true, cellSizeX: 0.5, cellSizeY: -0.5, originX: 1000.25, originY: 5000.75,
-		datum: "WGS84", projection: "LOCAL", units: null, levelTableOffset: 0x59 });
+		datum: "WGS84", projection: "LOCAL", units: null, levelTableOffset: 0x59, colorSpace: "yuv", levelRecordLength: 21 });
+});
+
+test("the colour space comes from byte 0x03", function () {
+	var names = [0, 1, 2, 3, 4, 5, 6].map(function (v) { return parse({ colorSpace: v }).colorSpace; });
+	assert.deepEqual(names, ["none", "greyscale", "yuv", "multiband", "rgb", "ycbcr", "unknown"]);
+});
+
+test("level records are 9 + 4 x bands bytes", function () {
+	assert.equal(parse({ bands: 1 }).levelRecordLength, 13);
+	assert.equal(parse({ bands: 5 }).levelRecordLength, 29);
 });
 
 test("georef flag 0 reads as no georeference", function () {

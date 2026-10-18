@@ -151,6 +151,30 @@ test("detail coefficients are scaled by the record's a / b / c steps per band", 
 	}
 });
 
+test("each band uses its own step, for any band count", async function () {
+	var coeff = function (r, b, sb, x, y) { return r === 0 && sb === "LL" ? 50 : (r === 1 && sb === "HL" && x === 2 && y === 1 ? 3 : 0); };
+	for (var c of [{ bands: 1, steps: [6] }, { bands: 5, steps: [1, 2, 3, 4, 6] }]) {
+		var stepsFor = function (r) { return r === 1 ? c.steps : c.steps.map(function () { return 1; }); };
+		var plain = buildCodedFile({ width: 32, height: 24, levelCount: 2, bands: c.bands, colorSpace: c.bands === 1 ? 1 : 3, coeff: coeff });
+		var scaled = buildCodedFile({ width: 32, height: 24, levelCount: 2, bands: c.bands, colorSpace: c.bands === 1 ? 1 : 3, coeff: coeff, steps: stepsFor });
+		var ref = await decodeWindow(contextFor(plain.bytes).ctx, 2, 0, 0, 32, 24);
+		var got = await decodeWindow(contextFor(scaled.bytes).ctx, 2, 0, 0, 32, 24);
+		assert.equal(got.bands.length, c.bands);
+		for (var b = 0; b < c.bands; b++) for (var i = 0; i < 32 * 24; i++) {
+			assert.equal(got.bands[b][i], 50 + (ref.bands[b][i] - 50) * c.steps[b], c.bands + " bands: band " + b + " pixel " + i);
+		}
+	}
+});
+
+test("record 0's steps scale its LL coefficients too", async function () {
+	var coeff = function (r, b, sb, x, y) { return sb === "LL" ? [40, 30, 20][b] + (x % 3) : 0; };
+	var file = buildCodedFile({ width: 32, height: 24, levelCount: 2, coeff: coeff, steps: function (r) { return r === 0 ? [1, 2, 3] : [1, 1, 1]; } });
+	var plain = buildCodedFile({ width: 32, height: 24, levelCount: 2, coeff: coeff });
+	var a = await decodeWindow(contextFor(file.bytes).ctx, 0, 0, 0, 8, 6);
+	var b = await decodeWindow(contextFor(plain.bytes).ctx, 0, 0, 0, 8, 6);
+	for (var band = 0; band < 3; band++) assert.deepEqual(Array.from(a.bands[band]), Array.from(b.bands[band], function (v) { return v * [1, 2, 3][band]; }), "band " + band);
+});
+
 test("a band whose detail streams are all empty in a block takes the exact path", async function () {
 	// band 0 has details in every block of every record (general path, quarter-floored);
 	// bands 1 and 2 have none anywhere (exact path everywhere)

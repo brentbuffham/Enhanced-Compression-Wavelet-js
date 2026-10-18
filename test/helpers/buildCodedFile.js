@@ -13,8 +13,12 @@ function ceilLevels(width, height, count, steps) {
 	var list = [];
 	for (var k = 0; k < count; k++) {
 		var s = Math.pow(2, count - k);
+		// steps(k) gives { a, b, c } or an array with one step per band
 		var st = steps ? steps(k) : { a: 1, b: 1, c: 1 };
-		list.push({ level: k, width: Math.ceil(width / s), height: Math.ceil(height / s), a: st.a, b: st.b, c: st.c });
+		var lv = { level: k, width: Math.ceil(width / s), height: Math.ceil(height / s) };
+		if (Array.isArray(st)) lv.steps = st;
+		else { lv.a = st.a; lv.b = st.b; lv.c = st.c; }
+		list.push(lv);
 	}
 	return list;
 }
@@ -80,7 +84,7 @@ export function buildCodedFile(o) {
 		}
 	});
 	var bytes = buildEcwFile({
-		headerOverrides: { width: o.width, height: o.height, levelCount: o.levelCount, bands: bands, blockWidth: block, blockHeight: block, levels: levels },
+		headerOverrides: { width: o.width, height: o.height, levelCount: o.levelCount, bands: bands, blockWidth: block, blockHeight: block, levels: levels, colorSpace: o.colorSpace === undefined ? 2 : o.colorSpace },
 		blocks: blocks
 	});
 	return { bytes: bytes, levels: levels };

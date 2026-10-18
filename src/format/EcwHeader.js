@@ -4,7 +4,8 @@
 // Layout worked out from file bytes and checked against GDAL;
 // see _dev/ecw-decode/FINDINGS.md "fixed header".
 // ⚠️ Mixed endianness: integers big-endian, doubles little-endian.
-// Unknown bytes (0x02-0x03, 0x05, 0x10) are skipped, not guessed.
+// Byte 0x03 is the colour space (meanings named by the ECW SDK through
+// GDAL). Unknown bytes (0x02, 0x05, 0x10) are skipped, not guessed.
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
@@ -14,14 +15,24 @@ import { readAscii } from "../io/ByteSource.js";
 export var ECW_SIGNATURE = 0x65;
 /** Bytes before the level table. */
 export var HEADER_FIXED_LENGTH = 0x59;
-/** Bytes per level-table record. */
-export var LEVEL_RECORD_LENGTH = 21;
+/**
+ * Bytes per level-table record: index, width, height, one step per band.
+ * @param {number} bands
+ * @returns {number}
+ */
+export function levelRecordLength(bands) {
+	return 9 + 4 * bands;
+}
+
+// Byte 0x03 values; only "yuv" carries luma/chroma bands needing colour conversion
+var COLOR_SPACES = ["none", "greyscale", "yuv", "multiband", "rgb", "ycbcr"];
 
 var SUPPORTED_VERSION = 2;
 var NAME_LENGTH = 16;
 
 var HEADER_SIGNATURE_OFFSET = 0x00;
 var HEADER_VERSION_OFFSET = 0x01;
+var HEADER_COLOR_SPACE_OFFSET = 0x03;
 var HEADER_LEVEL_COUNT_OFFSET = 0x04;
 var HEADER_WIDTH_OFFSET = 0x06;
 var HEADER_HEIGHT_OFFSET = 0x0A;
@@ -48,7 +59,9 @@ function requirePositive(value, offset, name) {
  * @returns {{version:number, levelCount:number, width:number, height:number, bands:number,
  *   blockWidth:number, blockHeight:number, compressionTarget:number, hasGeoreference:boolean,
  *   cellSizeX:number, cellSizeY:number, originX:number, originY:number,
- *   datum:string, projection:string, units:null, levelTableOffset:number}}
+ *   datum:string, projection:string, units:null, levelTableOffset:number,
+ *   colorSpace:string, levelRecordLength:number}}
+ *   colorSpace: "none", "greyscale", "yuv", "multiband", "rgb", "ycbcr" or "unknown".
  */
 export function parseHeader(source) {
 	// Step 1) Enough bytes for the fixed part
@@ -82,6 +95,8 @@ export function parseHeader(source) {
 		datum: readAscii(source, HEADER_DATUM_OFFSET, NAME_LENGTH),
 		projection: readAscii(source, HEADER_PROJECTION_OFFSET, NAME_LENGTH),
 		units: null,
-		levelTableOffset: HEADER_FIXED_LENGTH
+		levelTableOffset: HEADER_FIXED_LENGTH,
+		colorSpace: COLOR_SPACES[source.getUint8(HEADER_COLOR_SPACE_OFFSET)] || "unknown",
+		levelRecordLength: levelRecordLength(source.getUint16(HEADER_BANDS_OFFSET, false))
 	};
 }

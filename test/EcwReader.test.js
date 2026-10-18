@@ -12,7 +12,7 @@ import { buildEcwHeader } from "./helpers/buildEcwHeader.js";
 test("openEcw exposes info from a synthetic header", async function () {
 	var r = await openEcw(new Blob([buildEcwHeader({})]));
 	assert.deepEqual(r.info, { version: 2, width: 1000, height: 600, bands: 3, blockWidth: 64, blockHeight: 64,
-		compressionTarget: 8, levels: [{ width: 125, height: 75 }, { width: 250, height: 150 }, { width: 500, height: 300 }, { width: 1000, height: 600 }],
+		compressionTarget: 8, colorSpace: "yuv", levels: [{ width: 125, height: 75 }, { width: 250, height: 150 }, { width: 500, height: 300 }, { width: 1000, height: 600 }],
 		cellSizeX: 0.5, cellSizeY: -0.5, originX: 1000.25, originY: 5000.75, datum: "WGS84", projection: "LOCAL", units: null });
 });
 

@@ -119,6 +119,17 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - The three u32 values in each level record are per-band dequantisation steps for that record's detail subbands: `a` for band 0 (luma), `b` for band 1, `c` for band 2. LL is used as decoded (record 0 has a = b = c = 1 on Sample A, so an LL step cannot be confirmed yet).
 - Evidence: Sample A's steps are 1 for the coarse records, then a = 2, 4, 8 and b = c = 3, 6, 12, 24 at the finest records. Applying them at full resolution cuts the worst error against GDAL from 19 to 4 and the mean from 7.8 to 1.1 (512×512 crop inside the imagery). Applying `a` to all bands leaves chroma errors up to 19.
 
+## ⭐ CRACKED: colour space and band-sized level records
+
+- No greyscale file was available, so 1-band files were crafted and decoded by the SDK (`greyCraft.mjs`, `headerSweep.mjs`). With 21-byte level records the SDK refused them at open ("ECW error") for every value of every unknown header byte.
+- Level records are 9 + 4 × bands bytes: index, width, height, one step per band. With 13-byte records a 1-band file opens.
+- Byte `0x03` is the colour space, named by gdalinfo's COLORSPACE: 0 NONE, 1 GREYSCALE, 2 reported as RGB (the luma/chroma space every real file uses; a 1-band file with it crashes the SDK), 3 MULTIBAND, 4 RGB, 5 YCbCr, 6 unrecognized.
+- Only colour space 2 is colour-converted. Constant-LL files with values (100, 20, −10) decode to (87, 100, 136) in space 2 and to (100, 20, 0) in every other space: bands pass through, floored and clamped.
+- Record 0's steps scale its LL too (LL 40/30/20 with steps 1/2/3 decodes to 40/60/60); real files all have 1 there.
+- `0x10` (u16) must be non-zero; `0x05` must be 4 for a 3-band file to decode; neither changes what gdalinfo reports.
+- Result: crafted greyscale (three files, up to 4 levels, odd sizes, empty streams, steps), rgb, yuv with record-0 steps and 4-band multiband files all decode bit-exact against the SDK (about 200,000 pixels, no differences).
+- GDAL's ECW driver documentation (public) confirms version 2 is 8 bits per channel and gives COMPRESSION_RATE_TARGET = 100 / (100 − TARGET).
+
 ## Note on the reference set
 
 - The original centre crops fell in the black notch of the footprint and matched trivially. `makeRefs.mjs` now places the aligned and straddle crops inside the imagery (nearest solid point to the imagery centroid on the finest level reference).

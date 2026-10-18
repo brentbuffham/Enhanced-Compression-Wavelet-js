@@ -125,3 +125,31 @@ test("computeStretch takes the cumulative cut from a small overview", async func
 	assert.deepEqual(s, stretchFromPixels(thumb.data, { cut: [2, 98], ignoreBelow: 3 }));
 	assert.ok(s.max[1] > s.min[1]);
 });
+
+// One-level file of constant LL per band in a given colour space
+function spaceFile(bands, colorSpace, values) {
+	return new Blob([buildCodedFile({ width: 16, height: 16, levelCount: 1, bands: bands, colorSpace: colorSpace,
+		coeff: function (r, b, sb) { return sb === "LL" ? values[b] : 0; } }).bytes]);
+}
+
+test("greyscale files decode to grey, floored and clamped", async function () {
+	var ecw = await openEcw(spaceFile(1, 1, [137]));
+	assert.equal(ecw.info.colorSpace, "greyscale");
+	assert.deepEqual(pixel(await ecw.readRegion({ x: 0, y: 0, width: 16, height: 16 }), 3, 3), [137, 137, 137, 255]);
+	assert.deepEqual(pixel(await (await openEcw(spaceFile(1, 1, [300]))).readRegion({ x: 0, y: 0, width: 4, height: 4 }), 0, 0), [255, 255, 255, 255]);
+});
+
+test("only the yuv colour space is colour-converted; rgb and others pass bands through", async function () {
+	var yuv = await (await openEcw(spaceFile(3, 2, [100, 20, -10]))).readRegion({ x: 0, y: 0, width: 4, height: 4 });
+	assert.deepEqual(pixel(yuv, 0, 0), [87, 100, 136, 255]);
+	for (var space of [0, 3, 4, 5]) {
+		var img = await (await openEcw(spaceFile(3, space, [100, 20, -10]))).readRegion({ x: 0, y: 0, width: 4, height: 4 });
+		assert.deepEqual(pixel(img, 0, 0), [100, 20, 0, 255], "colour space " + space);
+	}
+});
+
+test("multiband files show their first three bands", async function () {
+	var ecw = await openEcw(spaceFile(5, 3, [10, 20, 30, 40, 50]));
+	assert.equal(ecw.info.colorSpace, "multiband");
+	assert.deepEqual(pixel(await ecw.readRegion({ x: 0, y: 0, width: 4, height: 4 }), 0, 0), [10, 20, 30, 255]);
+});

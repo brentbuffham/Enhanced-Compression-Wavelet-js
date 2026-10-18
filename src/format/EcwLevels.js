@@ -1,9 +1,9 @@
 // src/format/EcwLevels.js
 //==========================================================
-// ECW resolution-level table: `levelCount` records of 21 bytes
-// from 0x59, coarsest first. Each record is u8 level index,
-// u32 BE width, u32 BE height, then three u32 BE values a, b, c
-// whose meaning is still open (FINDINGS.md "level table").
+// ECW resolution-level table: `levelCount` records from 0x59,
+// coarsest first. Each record is u8 level index, u32 BE width,
+// u32 BE height, then one u32 BE dequantisation step per band, so a
+// record is 9 + 4 x bands bytes (21 for RGB). FINDINGS.md "level table".
 // Full resolution is not a record; it comes from the header.
 // The ceil-halving rule is exported for tests and tools but not
 // enforced, because only one encoder has been seen so far.
@@ -12,7 +12,7 @@
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
-import { LEVEL_RECORD_LENGTH } from "./EcwHeader.js";
+import { levelRecordLength } from "./EcwHeader.js";
 
 var HEADER_LEVEL_COUNT_OFFSET = 0x04;
 
@@ -22,7 +22,7 @@ var HEADER_LEVEL_COUNT_OFFSET = 0x04;
  * @returns {number}
  */
 export function levelTableEnd(header) {
-	return header.levelTableOffset + header.levelCount * LEVEL_RECORD_LENGTH;
+	return header.levelTableOffset + header.levelCount * levelRecordLength(header.bands);
 }
 
 /**
@@ -47,7 +47,8 @@ function bad(message, offset) {
  * Parse the level table.
  * @param {object} source - Source contract holding the header and table.
  * @param {object} header - parseHeader() result.
- * @returns {Array<{level:number,width:number,height:number,a:number,b:number,c:number}>}
+ * @returns {Array<{level:number,width:number,height:number,steps:number[],a:number,b:number,c:number}>}
+ *   steps holds one step per band; a, b, c are steps[0..2] (undefined past the band count).
  */
 export function parseLevels(source, header) {
 	if (header.levelCount === 0) throw bad("level table is empty", HEADER_LEVEL_COUNT_OFFSET);
@@ -57,14 +58,17 @@ export function parseLevels(source, header) {
 	}
 	var levels = [];
 	for (var i = 0; i < header.levelCount; i++) {
-		var pos = header.levelTableOffset + i * LEVEL_RECORD_LENGTH;
+		var pos = header.levelTableOffset + i * levelRecordLength(header.bands);
+		var steps = [];
+		for (var b = 0; b < header.bands; b++) steps.push(source.getUint32(pos + 9 + 4 * b, false));
 		var record = {
 			level: source.getUint8(pos),
 			width: source.getUint32(pos + 1, false),
 			height: source.getUint32(pos + 5, false),
-			a: source.getUint32(pos + 9, false),
-			b: source.getUint32(pos + 13, false),
-			c: source.getUint32(pos + 17, false)
+			steps: steps,
+			a: steps[0],
+			b: steps[1],
+			c: steps[2]
 		};
 		var prev = levels[i - 1];
 		if (record.level !== i) throw bad("record " + i + " has level index " + record.level, pos);

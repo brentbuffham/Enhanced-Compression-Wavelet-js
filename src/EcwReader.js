@@ -17,7 +17,7 @@ import { parseBlockIndex, blockGrid, blockEntryWindow, blockByteRange } from "./
 import { pixelWindowToBounds } from "./format/georef.js";
 import { createDecodeContext, decodeWindow, imageLevelSize, countWindowBlocks } from "./decode/RegionDecoder.js";
 import { sampleWindow } from "./decode/sampleWindow.js";
-import { yuvToRgba, greyToRgba } from "./codec/colour.js";
+import { yuvToRgba, greyToRgba, bandsToRgba } from "./codec/colour.js";
 import { applyTransparency } from "./post/applyTransparency.js";
 import { clipToPolygon } from "./post/clipToPolygon.js";
 import { applyStretch, stretchFromPixels } from "./post/stretch.js";
@@ -56,6 +56,7 @@ export function EcwReader(blobSource, header, levels, headerBytes, cache) {
 		blockWidth: header.blockWidth,
 		blockHeight: header.blockHeight,
 		compressionTarget: header.compressionTarget,
+		colorSpace: header.colorSpace,
 		levels: levels.map(function (l) { return { width: l.width, height: l.height }; })
 			.concat([{ width: header.width, height: header.height }]),
 		cellSizeX: header.cellSizeX,
@@ -158,7 +159,9 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	if (this._cache) await this._cache.flush();
 	var sampled = sampleWindow(win.bands, lx1 - lx0, ly1 - ly0, o, scale, lx0, ly0, outW, plan.outH, plan.resample, oy0, oy1);
 	var data = new Uint8ClampedArray(outW * (oy1 - oy0) * 4);
-	if (h.bands >= 3) yuvToRgba(sampled[0], sampled[1], sampled[2], data);
+	// only yuv files hold luma/chroma; other colour spaces show their first three bands (or one as grey)
+	if (h.bands >= 3 && h.colorSpace === "yuv") yuvToRgba(sampled[0], sampled[1], sampled[2], data);
+	else if (h.bands >= 3) bandsToRgba(sampled[0], sampled[1], sampled[2], data);
 	else greyToRgba(sampled[0], data);
 	if (o.transparentBelow !== undefined) applyTransparency(data, o.transparentBelow);
 	if (o.stretch !== undefined) applyStretch(data, o.stretch);
