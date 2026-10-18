@@ -100,3 +100,11 @@ test("horizontal averages stay exact", function () {
 	var out = synthesizeWindow(p, 0, 0, 4, 1);
 	assert.deepEqual(Array.from(out), [10.125, 10.1875, 10.25, 10.25]);
 });
+
+test("floorAt(c, k) false switches a coefficient to the exact path", function () {
+	var p = planes(1, 2);
+	p.LL[0] = 10.125; p.LL[1] = 10.25;
+	p.floorAt = function () { return false; };
+	var out = synthesizeWindow(p, 0, 0, 2, 4);
+	assert.deepEqual(Array.from(out), [10.125, 10.125, 10.1875, 10.1875, 10.25, 10.25, 10.25, 10.25]);
+});

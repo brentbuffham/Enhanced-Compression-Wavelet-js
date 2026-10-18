@@ -149,3 +149,31 @@ test("detail coefficients are scaled by the record's a / b / c steps per band", 
 		assert.equal(got.bands[b][i], expected, "band " + b + " pixel " + i);
 	}
 });
+
+test("a band whose detail streams are all empty in a block takes the exact path", async function () {
+	// band 0 has details in every block of every record (general path, quarter-floored);
+	// bands 1 and 2 have none anywhere (exact path everywhere)
+	var o = { width: 64, height: 48, levelCount: 3, coeff: function (r, b, sb, x, y) {
+		if (r === 0 && sb === "LL") return 20 + ((x * 37 + y * 101 + b * 7) % 150);
+		return b === 0 ? ((x + y + sb.length + r) % 3) - 1 || 1 : 0;
+	} };
+	var built = buildCodedFile(o);
+	var got = await decodeWindow(contextFor(built.bytes).ctx, 3, 0, 0, 64, 48);
+	function reference(band, floorIt) {
+		var img = null, w = 0;
+		built.levels.forEach(function (lv, r) {
+			var p = { w: lv.width, h: lv.height, x0: 0, y0: 0, width: lv.width, height: lv.height, floorAt: function () { return floorIt; } };
+			["LL", "LH", "HL", "HH"].forEach(function (sb) {
+				p[sb] = new Float32Array(lv.width * lv.height);
+				for (var y = 0; y < lv.height; y++) for (var x = 0; x < lv.width; x++) p[sb][y * lv.width + x] = sb === "LL" ? (r === 0 ? o.coeff(0, band, "LL", x, y) : img[y * (2 * w) + x]) : o.coeff(r, band, sb, x, y);
+			});
+			img = synthesizeWindow(p, 0, 0, 2 * lv.width, 2 * lv.height);
+			w = lv.width;
+		});
+		return { data: img, stride: 2 * w };
+	}
+	var expected = [reference(0, true), reference(1, false), reference(2, false)];
+	for (var b = 0; b < 3; b++) for (var y = 0; y < 48; y++) for (var x = 0; x < 64; x++) {
+		assert.equal(got.bands[b][y * 64 + x], expected[b].data[y * expected[b].stride + x], "band " + b + " at " + x + "," + y);
+	}
+});

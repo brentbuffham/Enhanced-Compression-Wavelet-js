@@ -11,10 +11,13 @@
 // Detail coefficients are dequantised by the record's per-band step:
 // a (band 0), b (band 1), c (band 2) from the level table
 // (FINDINGS.md "quantisation steps"). LL is used as decoded.
+// Where a band's three detail streams in a block are all empty, the
+// SDK synthesises that band's block on an exact path; elsewhere it
+// floors vertical averages to quarters (wavelet floorAt).
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
-import { splitBlockStreams } from "../format/EcwBlockFrame.js";
+import { splitBlockStreams, STREAM_MODE } from "../format/EcwBlockFrame.js";
 import { decodeStream } from "../codec/streams.js";
 import { synthesizeWindow, requiredCoefficientWindow } from "../codec/wavelet.js";
 
@@ -63,12 +66,18 @@ async function getBlock(ctx, record, row, col) {
 	var bytes = await ctx.fetchBlock(n);
 	ctx.fetched++;
 	if (ctx.onBlock) ctx.onBlock(ctx.fetched);
+	var streams = splitBlockStreams(bytes, h.bands, record);
 	var entry = {
 		pw: Math.min(h.blockWidth, lv.width - col * h.blockWidth),
 		ph: Math.min(h.blockHeight, lv.height - row * h.blockHeight),
-		streams: splitBlockStreams(bytes, h.bands, record),
-		decoded: {}
+		streams: streams,
+		decoded: {},
+		// per band: true when its LH, HL and HH streams are all empty
+		detailEmpty: []
 	};
+	for (var b = 0; b < h.bands; b++) {
+		entry.detailEmpty.push(streams.every(function (st) { return st.band !== b || st.subband === "LL" || st.mode === STREAM_MODE.EMPTY; }));
+	}
 	ctx.blocks.set(n, entry);
 	return entry;
 }
@@ -114,6 +123,16 @@ async function readCoefficients(ctx, record, subbands, x0, y0, x1, y1) {
 	return out;
 }
 
+// floorAt(c, k) for one band of one record: quarter-floor unless the
+// band's detail streams in the block holding coefficient (c, k) are all empty
+function floorAtFor(ctx, record, band) {
+	var g = ctx.grid[record], bw = ctx.header.blockWidth, bh = ctx.header.blockHeight;
+	return function (c, k) {
+		var entry = ctx.blocks.get(g.firstBlock + Math.floor(k / bh) * g.cols + Math.floor(c / bw));
+		return !entry || !entry.detailEmpty[band];
+	};
+}
+
 // Multiply detail planes in place by the record's per-band step
 function dequantise(details, record) {
 	var steps = [record.a, record.b, record.c];
@@ -157,7 +176,8 @@ export async function decodeWindow(ctx, j, x0, y0, x1, y1) {
 	for (var b = 0; b < h.bands; b++) {
 		bands.push(synthesizeWindow({
 			w: lv.width, h: lv.height, x0: c.x0, y0: c.y0, width: c.x1 - c.x0, height: c.y1 - c.y0,
-			LL: low.bands[b], LH: details[b].LH, HL: details[b].HL, HH: details[b].HH
+			LL: low.bands[b], LH: details[b].LH, HL: details[b].HL, HH: details[b].HH,
+			floorAt: floorAtFor(ctx, record, b)
 		}, x0, y0, x1, y1));
 	}
 	return { width: x1 - x0, height: y1 - y0, bands: bands };

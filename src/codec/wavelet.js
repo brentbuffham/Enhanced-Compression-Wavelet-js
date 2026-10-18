@@ -49,7 +49,7 @@ function synth1d(s, d, len, o0, o1, out, outStride, outOffset, roundAverage) {
 			v = s(k) - (d(clamp(k - 1, len)) + d(k)) / 2;
 		} else {
 			var avg = (s(k) + s(clamp(k + 1, len))) / 2;
-			v = (roundAverage ? roundAverage(avg) : avg) + d(k);
+			v = (roundAverage ? roundAverage(avg, k) : avg) + d(k);
 		}
 		out[outOffset + (i - o0) * outStride] = v;
 	}
@@ -63,6 +63,8 @@ function synth1d(s, d, len, o0, o1, out, outStride, outOffset, roundAverage) {
  *   LL:Float32Array, LH:Float32Array, HL:Float32Array, HH:Float32Array}} src
  *   Coefficient window: plane values for coefficient columns [x0, x0+width)
  *   and rows [y0, y0+height); it must cover requiredCoefficientWindow().
+ *   Optional src.floorAt(c, k) -> false puts coefficient column c, row k on the
+ *   exact path (the SDK does this where a band's detail streams are empty).
  * @returns {Float32Array} (x1 - x0) * (y1 - y0) samples, row-major
  */
 export function synthesizeWindow(src, x0, y0, x1, y1) {
@@ -85,10 +87,12 @@ export function synthesizeWindow(src, x0, y0, x1, y1) {
 		var sPlane, dPlane;
 		var sv = function (k) { return sPlane[(clamp(k, h) - src.y0) * src.width + col]; };
 		var dv = function (k) { return dPlane[(clamp(k, h) - src.y0) * src.width + col]; };
+		var column = c;
+		var rounding = src.floorAt ? function (avg, k) { return src.floorAt(column, k) ? quarterFloor(avg) : avg; } : quarterFloor;
 		sPlane = src.LL; dPlane = src.LH;
-		synth1d(sv, dv, h, y0, y1, lo, cols, c - need.x0, quarterFloor);
+		synth1d(sv, dv, h, y0, y1, lo, cols, c - need.x0, rounding);
 		sPlane = src.HL; dPlane = src.HH;
-		synth1d(sv, dv, h, y0, y1, hi, cols, c - need.x0, quarterFloor);
+		synth1d(sv, dv, h, y0, y1, hi, cols, c - need.x0, rounding);
 	}
 
 	// Step 2) Row pass

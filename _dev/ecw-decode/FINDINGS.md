@@ -129,6 +129,15 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - The SDK floors Y, Cb and Cr to integers, then: `R = Y + T_R(Cr)`, `G = Y + T_GB(Cb) + T_GR(Cr)`, `B = Y + T_B(Cb)`, clamped. Each table is `floor(k·c + off + 0.5)` with k / off = 1.40228 / 1.011 (R), 1.77151 / 1.0075 (B), −0.34349 / −0.0075 (G from Cb), −0.71464 / −0.03 (G from Cr). These reproduce all 256 entries of each table swept from the SDK, and 100% of 65,000 random combinations and of half / quarter fractional inputs.
 - Effect on Sample A: level 1 now matches GDAL exactly (100%); levels 2–5 are 99.3 → 93.5% exact; full resolution 59% (max error 3).
 
+## ⭐ CRACKED (mostly): synthesis rounding
+
+- Crafted file with a single nonzero coefficient in one record-2 block: mismatches appear across that block's whole 128×128 output area and nowhere else. The SDK has two paths per block.
+- General path (the band has at least one nonzero detail stream in the block): the vertical (column) pass runs first and its odd-row averages `(s[k] + s[k+1]) / 2` are floored to quarters; the horizontal pass is exact. Fitted per pixel inside that block: 3,672 / 3,672 odd-odd pixels exact.
+- Exact path (the band's LH, HL and HH streams in the block are all empty): no flooring. Decided per band: luma floored + chroma exact scores 99.64% on a crafted file where only luma has details, against 98.53% when every band is floored.
+- Crafted results with both rules: 2 levels 100%, odd size 491×257 100%, 3 levels ~99.3%, 4 levels ~97.3%. Something small still escapes at 3+ levels (all remaining crafted mismatches at even-row, odd-column pixels, SDK higher).
+- Effect on Sample A: levels 1–2 exact; level 3 99.6%, level 4 98.7%, level 5 97.6%; full resolution 84% exact, max error 3.
+- Ruled out while finding this: per-level fixed point (any bit count), mid-pass rounding in rows-first order, floored or rounded horizontal averages, rounding only when storing intermediate levels, per-level pass order.
+
 ## Narrowed: what is left at deeper levels
 
 - Crafted files (even sizes, mode 6): 1 and 2 levels decode exactly, with random details on every record. With 3 levels, only the last record's details cause mismatches: always at odd-odd pixels, the SDK always 1 lower, and only where our luma is within ~5/64 above an integer.
