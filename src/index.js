@@ -15,3 +15,7 @@ export { parseLevels } from "./format/EcwLevels.js";
 export { pixelWindowToBounds } from "./format/georef.js";
 export { MemorySource } from "./io/MemorySource.js";
 export { BlobSource } from "./io/BlobSource.js";
+export { parseBlockIndex, blockGrid, blockEntryWindow, levelEntryWindow, blockByteRange } from "./format/EcwBlockIndex.js";
+export { splitBlockStreams, STREAM_MODE } from "./format/EcwBlockFrame.js";
+export { applyTransparency } from "./post/applyTransparency.js";
+export { clipToPolygon } from "./post/clipToPolygon.js";
