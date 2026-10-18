@@ -1,4 +1,4 @@
-samples/
+/samples/
 node_modules/
 coverage/
 *.log
