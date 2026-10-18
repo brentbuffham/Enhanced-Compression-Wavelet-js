@@ -6,9 +6,9 @@
 // writes the library call it made into "How it works".
 //==========================================================
 
-import { openEcw, pixelWindowToBounds, applyTransparency, clipToPolygon } from "../../src/index.js";
+import { openEcw, pixelWindowToBounds, applyTransparency, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles } from "../../src/index.js";
 import { blockSizeColor, sizeRange } from "./lib/colorScale.js";
-import { levelPictureBounds } from "./lib/demoCore.js";
+import { levelPictureBounds, KEPT_DIR } from "./lib/demoCore.js";
 import { Viewer } from "./viewer.js";
 
 var $ = function (id) { return document.getElementById(id); };
@@ -111,7 +111,7 @@ function how(code, result) {
 // Opening a file
 //----------------------------------------------------------
 
-async function openFileInDemo(f) {
+async function openFileInDemo(f, fromKept) {
 	file = f;
 	opened = null;
 	basePicture = null;
@@ -143,6 +143,7 @@ async function openFileInDemo(f) {
 	opened.grid.forEach(function (g, k) { if (g.cols * g.rows <= 600000) start = k; });
 	select.value = String(start);
 	await showLevel(start);
+	if ($("keepToggle").checked && !fromKept) await keepCurrent();
 }
 
 function renderInfo() {
@@ -317,6 +318,69 @@ async function runRead() {
 }
 
 //----------------------------------------------------------
+// Scratch tab (OPFS)
+//----------------------------------------------------------
+
+async function keepCurrent() {
+	try {
+		var kept = await run("keep", { name: file.name });
+		how("// in the worker: stream the File into OPFS\nvar w = await openScratchSyncWriter(" + JSON.stringify(file.name) + ", { dir: \"" + KEPT_DIR + "\" });\nfor await (var chunk of file.stream()) w.write(chunk);\nw.close();", kept);
+		if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+	} catch (err) {
+		if (err.code !== "ABORTED") setError(err);
+	}
+	refreshScratch();
+}
+
+function fileTable(files, actions) {
+	if (!files.length) return null;
+	return "<table class='grid-table file-list'><tr><th>name</th><th>size</th><th></th></tr>" + files.map(function (f) {
+		return "<tr><td style='text-align:left;word-break:break-all'>" + f.name.replace(/</g, "&lt;") + "</td><td>" + formatBytes(f.size) + "</td><td>" +
+			actions.map(function (a) { return "<button class='button' data-action='" + a + "' data-name='" + encodeURIComponent(f.name) + "'>" + a + "</button>"; }).join(" ") + "</td></tr>";
+	}).join("") + "</table>";
+}
+
+async function refreshScratch() {
+	try {
+		var kept = await listScratchFiles({ dir: KEPT_DIR });
+		var scratch = await listScratchFiles();
+		$("keptList").innerHTML = fileTable(kept, ["open", "delete"]) || "None yet. Tick \"Keep in browser\" and open a file.";
+		$("keptList").classList.toggle("muted", !kept.length);
+		$("scratchList").innerHTML = fileTable(scratch, ["delete"]) || "None.";
+		$("scratchList").classList.toggle("muted", !scratch.length);
+		var rows = [["kept files", kept.length], ["scratch files", scratch.length]];
+		if (navigator.storage && navigator.storage.estimate) {
+			var est = await navigator.storage.estimate();
+			rows.push(["origin storage used", formatBytes(est.usage || 0)], ["quota", formatBytes(est.quota || 0)]);
+		}
+		$("storageTable").innerHTML = rows.map(function (r) { return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>"; }).join("");
+		return { kept: kept, scratch: scratch };
+	} catch (err) {
+		$("storageTable").innerHTML = "<tr><td>OPFS</td><td class='error'>" + err.message + "</td></tr>";
+	}
+}
+
+async function onScratchClick(event, dir) {
+	var button = event.target.closest("button[data-action]");
+	if (!button) return;
+	var name = decodeURIComponent(button.dataset.name);
+	var opts = dir ? { dir: dir } : undefined;
+	try {
+		if (button.dataset.action === "open") {
+			var f = await getScratchFile(name, opts);
+			how("var file = await getScratchFile(" + JSON.stringify(name) + ", { dir: \"" + KEPT_DIR + "\" });\nvar ecw = await openEcw(file);");
+			await openFileInDemo(f, true);
+		} else {
+			await removeScratchFile(name, opts);
+			how("await removeScratchFile(" + JSON.stringify(name) + (dir ? ", { dir: \"" + dir + "\" }" : "") + ");");
+		}
+	} catch (err) {
+		setError(err);
+	}
+	refreshScratch();
+}
+
+//----------------------------------------------------------
 // Wiring
 //----------------------------------------------------------
 
@@ -338,6 +402,20 @@ $("resetClip").addEventListener("click", function () {
 	if (basePicture) viewer.setPicture({ rgba: basePicture.rgba.slice(), width: basePicture.width, height: basePicture.height, bounds: basePicture.bounds }, true);
 });
 $("readButton").addEventListener("click", runRead);
+$("keptList").addEventListener("click", function (e) { onScratchClick(e, KEPT_DIR); });
+$("scratchList").addEventListener("click", function (e) { onScratchClick(e, null); });
+$("refreshScratch").addEventListener("click", refreshScratch);
+$("sweepButton").addEventListener("click", async function () {
+	var removed = await sweepStaleScratchFiles();
+	how("await sweepStaleScratchFiles(); // files older than 24 h", { removed: removed });
+	refreshScratch();
+});
+try { $("keepToggle").checked = localStorage.getItem("ecw-demo-keep") === "1"; } catch (err) { /* storage blocked */ }
+$("keepToggle").addEventListener("change", function (e) {
+	try { localStorage.setItem("ecw-demo-keep", e.target.checked ? "1" : "0"); } catch (err) { /* storage blocked */ }
+});
+document.querySelector(".tab[data-tab='scratch']").addEventListener("click", refreshScratch);
+refreshScratch();
 
 var dragDepth = 0;
 window.addEventListener("dragenter", function (e) { e.preventDefault(); dragDepth++; $("dropOverlay").classList.remove("hidden"); });

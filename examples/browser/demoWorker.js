@@ -2,13 +2,13 @@
 //==========================================================
 // Module Worker for the demo. Holds the dropped File and runs
 // demoCore jobs off the main thread.
-// In:  { id, type: "open" | "levelBlocks" | "inspect" | "sample", payload }
+// In:  { id, type: "open" | "levelBlocks" | "inspect" | "sample" | "keep", payload }
 // Out: { id, type: "progress", fraction, label }
 //      { id, type: "result", result }   (typed arrays transferred)
 //      { id, type: "error", code, message }
 //==========================================================
 
-import { openFile, readLevelBlockSizes, inspectBlock, sampleModes } from "./lib/demoCore.js";
+import { openFile, readLevelBlockSizes, inspectBlock, sampleModes, keepFile } from "./lib/demoCore.js";
 
 var state = null;
 
@@ -29,6 +29,9 @@ var handlers = {
 	},
 	inspect: function (payload) {
 		return inspectBlock(state.file, state.opened.index, state.opened.grid, state.opened.info, payload.n);
+	},
+	keep: function (payload, onProgress) {
+		return keepFile(state.file, payload.name, onProgress);
 	},
 	sample: function (payload, onProgress) {
 		return sampleModes(state.file, state.opened.index, state.opened.grid, state.opened.info, payload.level, payload.count, onProgress);

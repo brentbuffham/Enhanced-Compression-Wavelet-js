@@ -10,6 +10,9 @@
 	<header class="topbar">
 		<div class="brand"><strong>ecw-js</strong> <span class="muted">demo</span></div>
 		<div class="file-name" id="fileName">Drop an .ecw file anywhere</div>
+		<label class="toggle" title="Copy opened files into browser storage (OPFS) so they reopen after a reload">
+			<input type="checkbox" id="keepToggle"> Keep in browser
+		</label>
 		<label class="button">
 			Open file
 			<input type="file" id="fileInput" accept=".ecw" hidden>
@@ -33,6 +36,7 @@
 				<button class="tab" data-tab="blocks" role="tab">Blocks</button>
 				<button class="tab" data-tab="clip" role="tab">Clip</button>
 				<button class="tab" data-tab="read" role="tab">Read</button>
+				<button class="tab" data-tab="scratch" role="tab">Scratch</button>
 			</nav>
 
 			<div class="tab-body" id="tab-info">
@@ -83,6 +87,19 @@
 					<label>outHeight <input type="number" id="readOutH" value="1024"></label>
 				</div>
 				<button class="button" id="readButton" disabled>Run readRegion</button>
+			</div>
+
+			<div class="tab-body hidden" id="tab-scratch">
+				<p class="muted">Browser storage (OPFS) used by ecw-js. Kept files reopen instantly after a reload; scratch files hold decoded output and are swept after 24 hours.</p>
+				<table class="kv" id="storageTable"></table>
+				<h3>Kept files</h3>
+				<div id="keptList" class="muted">None yet. Tick "Keep in browser" and open a file.</div>
+				<h3>Scratch files</h3>
+				<div id="scratchList" class="muted">None.</div>
+				<div class="row">
+					<button class="button" id="sweepButton">Sweep stale</button>
+					<button class="button" id="refreshScratch">Refresh</button>
+				</div>
 			</div>
 
 			<section class="how">

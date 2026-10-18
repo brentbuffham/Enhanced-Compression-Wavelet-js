@@ -19,3 +19,4 @@ export { parseBlockIndex, blockGrid, blockEntryWindow, levelEntryWindow, blockBy
 export { splitBlockStreams, STREAM_MODE } from "./format/EcwBlockFrame.js";
 export { applyTransparency } from "./post/applyTransparency.js";
 export { clipToPolygon } from "./post/clipToPolygon.js";
+export { SCRATCH_DIR, openScratchSyncWriter, openScratchReader, removeScratchFile, sweepStaleScratchFiles, listScratchFiles, getScratchFile } from "./io/ScratchBinaryFile.js";

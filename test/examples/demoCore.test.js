@@ -87,3 +87,26 @@ test("levelPictureBounds covers whole blocks at that level", async function () {
 	// level 0 of 3: one level pixel = 8 full pixels; 2x2 blocks of 64 = 1024x1024 full pixels
 	assert.deepEqual(levelPictureBounds(f.info, f.header, f.grid[0]), { minX: 1000.25, minY: 5000.75 - 512, maxX: 1000.25 + 512, maxY: 5000.75 });
 });
+
+test("keepFile streams a file into the kept directory with progress", async function () {
+	var { createFakeRoot } = await import("../helpers/fakeOpfs.js");
+	var { keepFile, KEPT_DIR } = await import("../../examples/browser/lib/demoCore.js");
+	var root = createFakeRoot();
+	var calls = [];
+	var result = await keepFile(BLOB, "sample.ecw", function (f, l) { calls.push(f); }, { root: root });
+	assert.equal(KEPT_DIR, "ecw-kept");
+	assert.deepEqual(result, { name: "sample.ecw", bytes: BLOB.size });
+	var kept = await root.getDirectoryHandle(KEPT_DIR);
+	assert.deepEqual(Array.from(kept.fileBytes("sample.ecw")), Array.from(new Uint8Array(await BLOB.arrayBuffer())));
+	assert.equal(calls.at(-1), 1);
+});
+
+test("keepFile removes the partial copy when the stream fails", async function () {
+	var { createFakeRoot } = await import("../helpers/fakeOpfs.js");
+	var { keepFile, KEPT_DIR } = await import("../../examples/browser/lib/demoCore.js");
+	var root = createFakeRoot();
+	var broken = { size: 10, stream: function () { return new ReadableStream({ pull: function (c) { c.error(new Error("disk gone")); } }); } };
+	await assert.rejects(keepFile(broken, "bad.ecw", function () {}, { root: root }), /disk gone/);
+	var kept = await root.getDirectoryHandle(KEPT_DIR);
+	assert.equal(kept.fileBytes("bad.ecw"), null);
+});

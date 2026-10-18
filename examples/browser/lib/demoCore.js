@@ -10,6 +10,10 @@ import { openEcw, BlobSource, MemorySource, parseHeader, parseLevels, parseBlock
 	blockEntryWindow, levelEntryWindow, blockByteRange, splitBlockStreams, pixelWindowToBounds } from "../../../src/index.js";
 import { checkBlockIndex, totalBlocks } from "../../../src/format/EcwBlockIndex.js";
 import { readU64 } from "../../../src/io/ByteSource.js";
+import { openScratchSyncWriter, removeScratchFile } from "../../../src/io/ScratchBinaryFile.js";
+
+/** OPFS directory for files the user chose to keep (outside the 24 h scratch sweep). */
+export var KEPT_DIR = "ecw-kept";
 
 var HEADER_READ_BYTES = 8192;
 
@@ -123,4 +127,34 @@ export async function sampleModes(blob, index, grid, info, level, count, onProgr
 export function levelPictureBounds(info, header, gridLevel) {
 	var scale = Math.pow(2, header.levelCount - gridLevel.level);
 	return pixelWindowToBounds(info, 0, 0, gridLevel.cols * header.blockWidth * scale, gridLevel.rows * header.blockHeight * scale);
+}
+
+/**
+ * Stream a file into OPFS (KEPT_DIR) so it can be reopened after a reload.
+ * Worker only (sync access handle). A failed copy is removed.
+ * @param {Blob} blob
+ * @param {string} name
+ * @param {function(number, string)} onProgress
+ * @param {{root?: object}} [options]
+ * @returns {Promise<{name:string, bytes:number}>}
+ */
+export async function keepFile(blob, name, onProgress, options) {
+	var opts = { root: options && options.root, dir: KEPT_DIR };
+	var writer = await openScratchSyncWriter(name, opts);
+	var reader = blob.stream().getReader();
+	try {
+		for (;;) {
+			var chunk = await reader.read();
+			if (chunk.done) break;
+			writer.write(chunk.value);
+			onProgress(writer.bytesWritten() / blob.size, "keeping in browser");
+		}
+		writer.close();
+	} catch (err) {
+		writer.close();
+		await removeScratchFile(name, opts);
+		throw err;
+	}
+	onProgress(1, "kept " + name + " in browser storage");
+	return { name: name, bytes: writer.bytesWritten() };
 }

@@ -46,7 +46,8 @@ test("readRegion rejects NOT_IMPLEMENTED; close is idempotent", async function (
 
 test("public exports", async function () {
 	var mod = await import("../src/index.js");
-	assert.deepEqual(Object.keys(mod).sort(), ["BlobSource", "ERROR_CODES", "EcwError", "MemorySource", "STREAM_MODE", "VERSION",
-		"applyTransparency", "blockByteRange", "blockEntryWindow", "blockGrid", "clipToPolygon", "levelEntryWindow", "openEcw",
-		"parseBlockIndex", "parseHeader", "parseLevels", "pixelWindowToBounds", "splitBlockStreams"]);
+	assert.deepEqual(Object.keys(mod).sort(), ["BlobSource", "ERROR_CODES", "EcwError", "MemorySource", "SCRATCH_DIR", "STREAM_MODE", "VERSION",
+		"applyTransparency", "blockByteRange", "blockEntryWindow", "blockGrid", "clipToPolygon", "getScratchFile", "levelEntryWindow", "listScratchFiles", "openEcw",
+		"openScratchReader", "openScratchSyncWriter",
+		"parseBlockIndex", "parseHeader", "parseLevels", "pixelWindowToBounds", "removeScratchFile", "splitBlockStreams", "sweepStaleScratchFiles"]);
 });

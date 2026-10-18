@@ -84,6 +84,8 @@ code, pre { font-family: var(--mono); font-size: 12px; }
 .button:hover:not(:disabled) { border-color: var(--accent); }
 .button:disabled { opacity: 0.5; cursor: default; }
 .button.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.toggle { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.file-list td button { padding: 2px 8px; font-size: 12px; }
 .icon-button {
 	width: 30px;
 	height: 30px;

@@ -13,6 +13,9 @@ Drop an ECW file onto the page to see the library at work. Files are read locall
 - **Blocks**: `parseBlockIndex`, `blockGrid`, `levelEntryWindow`, `blockByteRange`, `splitBlockStreams`. A block-size map per level, hover to inspect a block's streams, and stream-mode sampling.
 - **Clip**: `clipToPolygon` and `applyTransparency` on the current picture.
 - **Read**: `readRegion`. Shows `NOT_IMPLEMENTED` until pixel decoding lands.
+- **Scratch**: `listScratchFiles`, `getScratchFile`, `removeScratchFile`, `sweepStaleScratchFiles`. Browser storage (OPFS) used, kept files, scratch files.
+
+Tick **Keep in browser** to copy an opened file into OPFS (in the Worker, with `openScratchSyncWriter`). Kept files live in `ecw-kept`, outside the 24-hour scratch sweep, and reopen from the Scratch tab after a reload.
 
 Each tab writes the call it made, and its result, into "How it works".
 
@@ -29,3 +32,5 @@ Each tab writes the call it made, and its result, into "How it works".
 9. Read tab: "Run readRegion" shows `NOT_IMPLEMENTED` in the status bar and in "How it works".
 10. Drop a non-ECW file (for example a PNG). The status bar shows `NOT_ECW` and the next ECW drop works.
 11. Toggle the panel with ☰. The viewer refits.
+12. Tick "Keep in browser" and drop a file. The status bar ends with "kept … in browser storage" and the Scratch tab lists it with storage used.
+13. Reload the page, open the Scratch tab, click "open" on the kept file. It opens without a drop. "delete" removes it.

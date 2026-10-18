@@ -20,7 +20,8 @@ function createFileEntry(name) {
 	entry.handle = {
 		kind: "file",
 		name: name,
-		getFile: async function () { return { size: entry.data.length, lastModified: entry.lastModified }; },
+		// Like OPFS, a File snapshot of the current bytes
+		getFile: async function () { return new File([entry.data.slice()], name, { lastModified: entry.lastModified }); },
 		createSyncAccessHandle: async function () {
 			if (entry.locked) throw locked(name);
 			entry.locked = true;

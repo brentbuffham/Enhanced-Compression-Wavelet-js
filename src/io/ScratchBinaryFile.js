@@ -9,6 +9,8 @@
 // are worker-only (sync access handles); opening is async.
 // Every function takes options.root (a directory handle) so tests
 // can pass an in-memory fake; default is navigator.storage.
+// options.dir picks the OPFS sub-directory (default SCRATCH_DIR), so
+// long-lived files can sit apart from the 24 h sweep.
 // ⚠️ OPFS sync handles hold an exclusive lock: close the writer
 // before opening a reader on the same file.
 //==========================================================
@@ -25,13 +27,13 @@ var LOCKED_ERRORS = ["NoModificationAllowedError", "InvalidModificationError"];
 
 async function getScratchDir(options) {
 	var root = (options && options.root) || await navigator.storage.getDirectory();
-	return root.getDirectoryHandle(SCRATCH_DIR, { create: true });
+	return root.getDirectoryHandle((options && options.dir) || SCRATCH_DIR, { create: true });
 }
 
 /**
  * Open (and empty) a scratch file for synchronous writing. Worker only.
  * @param {string} id - Scratch file name.
- * @param {{root?: object}} [options]
+ * @param {{root?: object, dir?: string}} [options]
  * @returns {Promise<{write(bytes: Uint8Array): void, writeAt(bytes: Uint8Array, pos: number): void,
  *   truncate(n: number): void, bytesWritten(): number, close(): void}>}
  */
@@ -147,7 +149,7 @@ ScratchSource.prototype.close = function () {
 /**
  * Open a scratch file as a sync source. Worker only.
  * @param {string} id
- * @param {{byteLength?: number, windowSize?: number, root?: object}} [options]
+ * @param {{byteLength?: number, windowSize?: number, root?: object, dir?: string}} [options]
  *   byteLength caps the logical length (scratch files may be padded).
  * @returns {Promise<ScratchSource>}
  */
@@ -164,7 +166,7 @@ export async function openScratchReader(id, options) {
 /**
  * Delete a scratch file. A missing file is not an error.
  * @param {string} id
- * @param {{root?: object}} [options]
+ * @param {{root?: object, dir?: string}} [options]
  */
 export async function removeScratchFile(id, options) {
 	var dir = await getScratchDir(options);
@@ -178,7 +180,7 @@ export async function removeScratchFile(id, options) {
 /**
  * Delete scratch files last modified more than maxAgeMs ago.
  * Files still locked by another tab or worker are skipped, not fatal.
- * @param {{maxAgeMs?: number, now?: number, root?: object}} [options]
+ * @param {{maxAgeMs?: number, now?: number, root?: object, dir?: string}} [options]
  * @returns {Promise<number>} count removed
  */
 export async function sweepStaleScratchFiles(options) {
@@ -202,4 +204,34 @@ export async function sweepStaleScratchFiles(options) {
 		}
 	}
 	return removed;
+}
+
+/**
+ * Files in a scratch directory, sorted by name.
+ * @param {{root?: object, dir?: string}} [options]
+ * @returns {Promise<Array<{name:string, size:number, lastModified:number}>>}
+ */
+export async function listScratchFiles(options) {
+	var dir = await getScratchDir(options);
+	var list = [];
+	for await (var handle of dir.values()) {
+		if (handle.kind !== "file") continue;
+		var file = await handle.getFile();
+		list.push({ name: handle.name, size: file.size, lastModified: file.lastModified });
+	}
+	list.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+	return list;
+}
+
+/**
+ * A scratch file as a File (usable anywhere a dropped File is, e.g. openEcw).
+ * Works on the main thread; no sync handle is taken.
+ * @param {string} id
+ * @param {{root?: object, dir?: string}} [options]
+ * @returns {Promise<File>}
+ */
+export async function getScratchFile(id, options) {
+	var dir = await getScratchDir(options);
+	var handle = await dir.getFileHandle(id);
+	return handle.getFile();
 }

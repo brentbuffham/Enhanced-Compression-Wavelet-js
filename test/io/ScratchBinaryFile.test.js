@@ -8,7 +8,7 @@
 /* prettier-ignore-file */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { openScratchSyncWriter, openScratchReader, removeScratchFile, sweepStaleScratchFiles, SCRATCH_DIR } from "../../src/io/ScratchBinaryFile.js";
+import { openScratchSyncWriter, openScratchReader, removeScratchFile, sweepStaleScratchFiles, listScratchFiles, getScratchFile, SCRATCH_DIR } from "../../src/io/ScratchBinaryFile.js";
 import { createFakeRoot } from "../helpers/fakeOpfs.js";
 
 function ramp(n) { return Uint8Array.from({ length: n }, function (_, i) { return i; }); }
@@ -143,4 +143,45 @@ test("sweep skips a locked stale file and still removes the others", async funct
 	assert.ok(dir.fileBytes("stale1"));
 	assert.equal(dir.fileBytes("stale2"), null);
 	held.close();
+});
+
+test("dir option keeps files in a separate directory", async function () {
+	var root = createFakeRoot();
+	var w = await openScratchSyncWriter("kept.ecw", { root: root, dir: "ecw-kept" });
+	w.write(ramp(5));
+	w.close();
+	var kept = await root.getDirectoryHandle("ecw-kept");
+	assert.equal(kept.fileBytes("kept.ecw").length, 5);
+	await assert.rejects(openScratchReader("kept.ecw", { root: root }));
+	assert.equal((await openScratchReader("kept.ecw", { root: root, dir: "ecw-kept" })).length(), 5);
+});
+
+test("sweep only touches its own directory", async function () {
+	var root = createFakeRoot();
+	await fileWith(root, "s", ramp(2));
+	var w = await openScratchSyncWriter("k", { root: root, dir: "ecw-kept" });
+	w.write(ramp(2));
+	w.close();
+	var now = Date.now() + 48 * 3600 * 1000;
+	assert.equal(await sweepStaleScratchFiles({ root: root, now: now }), 1);
+	assert.equal((await listScratchFiles({ root: root, dir: "ecw-kept" })).length, 1);
+});
+
+test("listScratchFiles reports name, size and lastModified, sorted by name", async function () {
+	var root = createFakeRoot();
+	await fileWith(root, "b", ramp(3));
+	await fileWith(root, "a", ramp(7));
+	var list = await listScratchFiles({ root: root });
+	assert.deepEqual(list.map(function (f) { return [f.name, f.size]; }), [["a", 7], ["b", 3]]);
+	assert.equal(typeof list[0].lastModified, "number");
+	assert.deepEqual(await listScratchFiles({ root: createFakeRoot() }), []);
+});
+
+test("getScratchFile returns a File readable by slice", async function () {
+	var root = createFakeRoot();
+	await fileWith(root, "a", ramp(10));
+	var file = await getScratchFile("a", { root: root });
+	assert.equal(file.size, 10);
+	assert.deepEqual(Array.from(new Uint8Array(await file.slice(2, 5).arrayBuffer())), [2, 3, 4]);
+	await assert.rejects(getScratchFile("missing", { root: root }));
 });
