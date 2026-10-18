@@ -162,7 +162,7 @@ test("a band whose detail streams are all empty in a block takes the exact path"
 	function reference(band, floorIt) {
 		var img = null, w = 0;
 		built.levels.forEach(function (lv, r) {
-			var p = { w: lv.width, h: lv.height, x0: 0, y0: 0, width: lv.width, height: lv.height, floorAt: function () { return floorIt; } };
+			var p = { w: lv.width, h: lv.height, x0: 0, y0: 0, width: lv.width, height: lv.height, subbandsAt: function () { return floorIt ? 7 : 0; } };
 			["LL", "LH", "HL", "HH"].forEach(function (sb) {
 				p[sb] = new Float32Array(lv.width * lv.height);
 				for (var y = 0; y < lv.height; y++) for (var x = 0; x < lv.width; x++) p[sb][y * lv.width + x] = sb === "LL" ? (r === 0 ? o.coeff(0, band, "LL", x, y) : img[y * (2 * w) + x]) : o.coeff(r, band, sb, x, y);
@@ -186,7 +186,7 @@ test("intermediate levels are stored at eighths; the requested level is not", as
 		var img = null, w = 0;
 		for (var r = 0; r < upTo; r++) {
 			var lv = built.levels[r];
-			var p = { w: lv.width, h: lv.height, x0: 0, y0: 0, width: lv.width, height: lv.height, floorAt: function () { return false; } };
+			var p = { w: lv.width, h: lv.height, x0: 0, y0: 0, width: lv.width, height: lv.height, subbandsAt: function () { return 0; } };
 			["LL", "LH", "HL", "HH"].forEach(function (sb) {
 				p[sb] = new Float32Array(lv.width * lv.height);
 				for (var y = 0; y < lv.height; y++) for (var x = 0; x < lv.width; x++) p[sb][y * lv.width + x] = sb === "LL" ? (r === 0 ? o.coeff(0, band, "LL", x, y) : img[y * (2 * w) + x]) : 0;

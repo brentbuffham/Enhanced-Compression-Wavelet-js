@@ -11,9 +11,9 @@
 // Detail coefficients are dequantised by the record's per-band step:
 // a (band 0), b (band 1), c (band 2) from the level table
 // (FINDINGS.md "quantisation steps"). LL is used as decoded.
-// Where a band's three detail streams in a block are all empty, the
-// SDK synthesises that band's block on an exact path; elsewhere it
-// floors vertical averages to quarters (wavelet floorAt).
+// A detail stream that is empty in a block drops that subband from
+// the block's output pixels, neighbours' coefficients included; with all
+// three empty the band takes the exact path (wavelet subbandsAt).
 // Every level that feeds another synthesis is stored floored to eighths,
 // as the SDK does; the requested level keeps full precision.
 //==========================================================
@@ -52,6 +52,8 @@ export function imageLevelSize(header, levels, j) {
 	return { width: levels[j].width, height: levels[j].height };
 }
 
+var SUBBAND_BIT = { LH: 1, HL: 2, HH: 4 };
+
 function checkAbort(ctx) {
 	if (ctx.signal && ctx.signal.aborted) throw new EcwError(ERROR_CODES.ABORTED, "decode aborted");
 }
@@ -74,12 +76,13 @@ async function getBlock(ctx, record, row, col) {
 		ph: Math.min(h.blockHeight, lv.height - row * h.blockHeight),
 		streams: streams,
 		decoded: {},
-		// per band: true when its LH, HL and HH streams are all empty
-		detailEmpty: []
+		// per band: bits of its non-empty detail streams (1 LH, 2 HL, 4 HH)
+		subbands: []
 	};
-	for (var b = 0; b < h.bands; b++) {
-		entry.detailEmpty.push(streams.every(function (st) { return st.band !== b || st.subband === "LL" || st.mode === STREAM_MODE.EMPTY; }));
-	}
+	for (var b = 0; b < h.bands; b++) entry.subbands.push(0);
+	streams.forEach(function (st) {
+		if (st.mode !== STREAM_MODE.EMPTY && SUBBAND_BIT[st.subband]) entry.subbands[st.band] |= SUBBAND_BIT[st.subband];
+	});
 	ctx.blocks.set(n, entry);
 	return entry;
 }
@@ -125,13 +128,13 @@ async function readCoefficients(ctx, record, subbands, x0, y0, x1, y1) {
 	return out;
 }
 
-// floorAt(c, k) for one band of one record: quarter-floor unless the
-// band's detail streams in the block holding coefficient (c, k) are all empty
-function floorAtFor(ctx, record, band) {
+// subbandsAt(c, k) for one band of one record: the band's non-empty
+// detail streams in the block holding coefficient (c, k)
+function subbandsAtFor(ctx, record, band) {
 	var g = ctx.grid[record], bw = ctx.header.blockWidth, bh = ctx.header.blockHeight;
 	return function (c, k) {
 		var entry = ctx.blocks.get(g.firstBlock + Math.floor(k / bh) * g.cols + Math.floor(c / bw));
-		return !entry || !entry.detailEmpty[band];
+		return entry ? entry.subbands[band] : 7;
 	};
 }
 
@@ -190,7 +193,7 @@ async function decodeLevel(ctx, j, x0, y0, x1, y1, requested) {
 		bands.push(synthesizeWindow({
 			w: lv.width, h: lv.height, x0: c.x0, y0: c.y0, width: c.x1 - c.x0, height: c.y1 - c.y0,
 			LL: low.bands[b], LH: details[b].LH, HL: details[b].HL, HH: details[b].HH,
-			floorAt: floorAtFor(ctx, record, b)
+			subbandsAt: subbandsAtFor(ctx, record, b)
 		}, x0, y0, x1, y1));
 	}
 	if (!requested) storeIntermediate(bands);

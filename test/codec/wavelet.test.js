@@ -101,10 +101,10 @@ test("horizontal averages stay exact", function () {
 	assert.deepEqual(Array.from(out), [10.125, 10.1875, 10.25, 10.25]);
 });
 
-test("floorAt(c, k) false switches a coefficient to the exact path", function () {
+test("subbandsAt(c, k) 0 switches a coefficient to the exact path", function () {
 	var p = planes(1, 2);
 	p.LL[0] = 10.125; p.LL[1] = 10.25;
-	p.floorAt = function () { return false; };
+	p.subbandsAt = function () { return 0; };
 	var out = synthesizeWindow(p, 0, 0, 2, 4);
 	assert.deepEqual(Array.from(out), [10.125, 10.125, 10.1875, 10.1875, 10.25, 10.25, 10.25, 10.25]);
 });
@@ -113,7 +113,7 @@ test("the output pixel's block decides the path for both columns it interpolates
 	var p = planes(2, 2);
 	// column 0 rows 10.125 / 10.25, column 1 rows 20.125 / 20.25
 	p.LL[0] = 10.125; p.LL[1] = 20.125; p.LL[2] = 10.25; p.LL[3] = 20.25;
-	p.floorAt = function (c) { return c === 0; };
+	p.subbandsAt = function (c) { return c === 0 ? 7 : 0; };
 	var out = synthesizeWindow(p, 0, 0, 4, 4);
 	// row 1, x 1 sits in column 0's block (general): (floor4(10.1875) + floor4(20.1875)) / 2 = (10 + 20) / 2
 	assert.equal(out[1 * 4 + 1], 15);
@@ -124,9 +124,29 @@ test("the output pixel's block decides the path for both columns it interpolates
 test("exact-path pixels ignore all detail coefficients, including neighbouring blocks'", function () {
 	var p = planes(2, 1);
 	p.LL[0] = 10; p.LL[1] = 20; p.HL[0] = 4;
-	p.floorAt = function (c) { return c === 0; };
+	p.subbandsAt = function (c) { return c === 0 ? 7 : 0; };
 	var out = synthesizeWindow(p, 0, 0, 4, 1);
 	// x0, x1 in column 0's block (general): 10 - (4 + 4) / 2 = 6; (10 + 20) / 2 + 4 = 19
 	// x2, x3 in column 1's block (exact): pure LL interpolation, the neighbour's HL is not used: 20; 20
 	assert.deepEqual(Array.from(out), [6, 19, 20, 20]);
+});
+
+test("a subband empty in the output pixel's block contributes nothing there, neighbours' coefficients included", function () {
+	var p = planes(1, 2, { LL: 100 });
+	p.HH[0] = 16; p.HL[1] = -40;
+	// block of coefficient row 0 has only HH; block of row 1 has only HL
+	p.subbandsAt = function (c, k) { return k === 0 ? 4 : 2; };
+	var out = synthesizeWindow(p, 0, 0, 2, 4);
+	// column high-pass per row: -16 (HH only), 16 (HH only, HL[1] ignored), -40 (HL only, HH[0] ignored), -40
+	assert.deepEqual(Array.from(out), [116, 84, 84, 116, 140, 60, 140, 60]);
+});
+
+test("an empty LH in the output pixel's block drops the neighbour's LH too", function () {
+	var p = planes(1, 2, { LL: 100 });
+	p.LH[0] = 16;
+	// row 0's block has LH; row 1's block has only HL (all zero)
+	p.subbandsAt = function (c, k) { return k === 0 ? 1 : 2; };
+	var out = synthesizeWindow(p, 0, 0, 2, 4);
+	// rows: 100 - (16 + 16) / 2 = 84; 100 + 16 = 116; 100 (LH[0] dropped); 100
+	assert.deepEqual(Array.from(out), [84, 84, 116, 116, 100, 100, 100, 100]);
 });

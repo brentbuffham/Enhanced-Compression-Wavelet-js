@@ -138,17 +138,18 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Effect on Sample A: levels 1–2 exact; level 3 99.6%, level 4 98.7%, level 5 97.6%; full resolution 84% exact, max error 3.
 - Ruled out while finding this: per-level fixed point (any bit count), mid-pass rounding in rows-first order, floored or rounded horizontal averages, rounding only when storing intermediate levels, per-level pass order.
 
-## ⭐ CRACKED: complete synthesis rules (exact on crafted files, 0.0015% off on Sample A)
+## ⭐ CRACKED: complete synthesis rules (bit-exact on crafted files and on Sample A)
 
 1. Columns first (LL with LH, HL with HH), then rows.
 2. Odd-odd output pixels interpolate vertical averages floored to quarters; every other pixel uses exact arithmetic. (Flooring the vertical pass for even columns too was the source of the earlier "even rows round up" residual.)
-3. The general (floored) vs exact path is chosen per band, by the block holding the output pixel: exact when that band's LH, HL and HH streams in the block are all empty.
+3. Per band, the block holding the output pixel decides which detail subbands take part. A subband whose stream is empty (mode 5) in that block contributes nothing to the pixel, not even the coefficients that neighbouring blocks hold across the edge. With all three empty the band takes the exact path: pure LL interpolation with no quarter flooring.
 4. Every level that feeds another synthesis is stored floored to eighths; the requested level keeps full precision. (LL-only 5-level files diverged from level 4 until this was added.)
-- Crafted files (2–5 levels, odd sizes 491×257 and 777×555, LL-only, detail subsets): 100.000% with only 3–4 stray values.
-- Sample A: levels 1–2 and all full-resolution crops exact; levels 3–5 have 6, 30 and 132 differing pixels out of 0.5–8 M, all within 1–2 grey levels and clustered at block-row and block-column boundaries. Total 168 / 11,157,750.
-- Block-boundary rules tried for those last pixels: next block, both, either (horizontally and vertically) — all worse than the output pixel's own block.
+- How rule 3 was found: `cornerBisect.mjs` re-crafts Sample A's first four records as a small file, which the SDK decodes identically to the real overview. That file kept our last 12 level-4 mismatches. Zeroing coefficients narrowed them to two: an HH in one block and an HL just across the block row below, both chroma. A synthetic file with constant LL and just those two coefficients reproduced it: the SDK's pixels on each side of the edge used only the subband present in their own block.
+- Steps on the way: "all three empty → exact" (168 left), then "the exact path ignores neighbours' details too" (77 left), then the per-subband rule (0 left).
+- Sample A: 0 differing pixels of 11,157,750 across levels 1–5 and the full-resolution crops. The sample test now demands exact equality.
+- Ruled out on the way: next / both / either block rules; per-block (all bands) emptiness; eighth storage on one path only; truncating instead of flooring the eighths (31,890 mismatches).
 
-## Narrowed: what is left at deeper levels
+## History (resolved): what was left at deeper levels
 
 - Crafted files (even sizes, mode 6): 1 and 2 levels decode exactly, with random details on every record. With 3 levels, only the last record's details cause mismatches: always at odd-odd pixels, the SDK always 1 lower, and only where our luma is within ~5/64 above an integer.
 - The SDK's intermediate levels floor-match ours exactly (GDAL outsize at levels 1 and 2 = 100%).
@@ -157,7 +158,7 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Crafted mode-2 streams from the test encoder (long chain codes) are not decoded the same by the SDK; real mode-2 streams are. Likely a code-length limit in the SDK; not investigated.
 - Ruled out here: fixed-point lifting with 2–8 fractional bits (floor / trunc / round); limited precision between row and column passes; phase-specific truncation of intermediate levels.
 
-## Open: the last ±1
+## History (resolved): the last ±1
 
 - Black background (all coefficients 0) decodes to (0,0,0); GDAL gives (1,0,1). So the SDK's colour step has offsets or chroma bias we do not reproduce.
 - Best so far: float synthesis, BT.601, +0.5 on R and B: 75% exact at level 2. Per-channel searches (rounding mode × offset × coefficient variants) top out at 72–82% per channel; Y/U/V offsets at 73%.

@@ -1,9 +1,8 @@
 // test/samples/readRegion.sample.test.js
 //==========================================================
 // readRegion against the GDAL reference set on the private sample.
-// Current state (FINDINGS.md): 168 of 11.2 M pixels differ (0.0015%), all
-// at overview levels 3-5 near block edges; full resolution exact.
-// Guard: max 2, >= 99.99% exact.
+// Current state (FINDINGS.md): every pixel matches the SDK bit for bit.
+// Guard: exact equality.
 // Level-0 reference is skipped: GDAL's coarsest overview is the level-1
 // reconstruction sampled at even pixels, not record 0's LL.
 // Skips without samples. Run with: node --test test/samples/readRegion.sample.test.js
@@ -20,8 +19,8 @@ import { findSample } from "../helpers/samples.js";
 var sample = findSample();
 var manifestPath = sample && join(sample.refDir, "manifest.json");
 var skip = sample && existsSync(manifestPath) ? false : "no samples/ref/manifest.json";
-var MAX_ERROR = 2;
-var MIN_EXACT = 0.9999;
+var MAX_ERROR = 0;
+var MIN_EXACT = 1;
 
 function compare(img, ref) {
 	var exact = 0, max = 0, n = 0;
@@ -36,7 +35,7 @@ function compare(img, ref) {
 	return { exact: exact / n, max: max };
 }
 
-test("readRegion matches GDAL references within tolerance", { skip: skip, timeout: 120000 }, async function () {
+test("readRegion matches GDAL references exactly", { skip: skip, timeout: 120000 }, async function () {
 	var ecw = await openEcw(await openAsBlob(sample.ecwPath));
 	var manifest = JSON.parse(readFileSync(manifestPath, "utf8")).filter(function (m) { return m.name !== "level-0.tif"; });
 	for (var m of manifest) {
