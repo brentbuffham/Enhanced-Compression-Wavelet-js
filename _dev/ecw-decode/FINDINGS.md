@@ -41,9 +41,39 @@ Integers big-endian, doubles little-endian.
 - Sample A: `a/b/c` stay at 1 for the coarsest levels, then grow with level. Meaning open.
 - GDAL reports floor-sized overviews and omits the coarsest stored level. Its coarsest overview repeats every value in pairs: GDAL upsamples the next level down.
 
-## Open: after the level table
+## ⭐ CRACKED: block index
 
-- More bytes follow the table, then what looks like rising u64 LE offsets. Task 13 of the foundation plan works this out.
+Right after the level table (`E = 0x59 + 21 × levelCount`):
+
+| Offset | Type | Meaning | Evidence |
+|---|---|---|---|
+| `E` | u32 BE `L` | Byte length of the index body that follows, counted from `E + 4` | `E + 4 + L` is exactly where the first block's bytes start |
+| `E + 4` | u8 `1` | Index flag/format byte (meaning open) | always 1 on Sample A |
+| `E + 5` | `(L - 1) / 8` × u64 LE | Block offsets, **relative to `dataStart = E + 4 + L`**, plus one end marker | first offset is 0; last offset + `dataStart` equals the file size exactly |
+
+- Entry count = Σ over level records of `ceil(levelWidth / blockWidth) × ceil(levelHeight / blockHeight)`, plus 1. Sample A matches exactly.
+- Order: level-major, coarsest level first; within a level, row-major (on Sample A the narrow edge blocks of level 0 sit exactly where row-major order puts them).
+- Block `i` occupies `[dataStart + off[i], dataStart + off[i+1])`.
+- One entry per block, not per band: all bands share a block.
+- On Sample A, bytes that look like an `'R' 'M'` marker in a hex dump are just the middle of the length `L`.
+
+## ⭐ CRACKED: block framing
+
+- A block starts with `streams - 1` u32 BE offsets, then the streams. Offsets are relative to the end of that header; stream 0 starts at offset 0.
+- Level 0 (coarsest) blocks have **12 streams**; every other level has **9**. Reading: 3 bands × 4 subbands (LL, LH, HL, HH) at level 0, and 3 bands × 3 detail subbands above it.
+- Order looks band-major: stream sizes come in groups (level 0: 4 per band; others: 3 per band) and band 0's streams are clearly the largest.
+- First byte of every stream is a mode tag. Only three values seen across 4,000 sampled blocks:
+  - `5`: empty stream, always exactly 1 byte long (all-zero subband). 31,399 of 36,003 streams.
+  - `2`: coded stream (3,271).
+  - `6`: coded stream, a second method (1,333).
+- Streams 3 to 8 (bands 1 and 2) are empty in about 98% of blocks, while streams 0 to 2 are coded about 40% of the time. Hypothesis: an internal luma/chroma colour transform, with chroma detail mostly quantised to zero.
+- Whole-block entropy is about 7.5 bits/byte: real entropy coding, not raw coefficients.
+
+## Open (for the codec plan)
+
+- What modes `2` and `6` are (likely candidates: run-length plus Huffman, or an adaptive arithmetic coder). Bytes after the tag start e.g. `27 01 00 …` and `20 80 01 …`.
+- Meaning of level-record `a/b/c`, header bytes `0x02–0x03`, `0x05`, `0x10`, and the index flag byte.
+- Quantisation (header compression target is 8), wavelet filter, and colour transform.
 
 ## Black / transparency
 
@@ -51,4 +81,6 @@ Integers big-endian, doubles little-endian.
 
 ## Ruled out (don't re-walk)
 
-- (none yet)
+- Offsets in the block index are not absolute file offsets (they start at 0).
+- The index is not one entry per band per block (count matches blocks exactly).
+- The `RM` bytes after the level table are not a marker; they belong to the index length.

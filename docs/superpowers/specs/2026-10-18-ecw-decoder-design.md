@@ -131,13 +131,17 @@ Evidence comes from a private RGB ECW v2 orthophoto. Its details stay out of the
 | `0x39`–`0x48` | 16 bytes ASCII, NUL-padded | Datum name | likely |
 | `0x49`–`0x58` | 16 bytes ASCII, NUL-padded | Projection name | likely |
 | `0x59` | `levelCount` × 21-byte records | Level table: u8 level, u32 BE width, u32 BE height, three u32 BE `a`, `b`, `c` | ✅ layout; `a/b/c` meaning open |
-| after table | `00 'R' 'M' 09 01 …` | Unknown marker | open |
-| `0x130`.. | rising u64 LE | Probable block offset table | hypothesis |
+| `E = 0x59 + 21 × levelCount` | u32 BE `L` | Index body length, counted from `E + 4` | ✅ |
+| `E + 4` | u8 `1` | Index flag (meaning open) | open |
+| `E + 5` | u64 LE × (blocks + 1) | Block offsets relative to `dataStart = E + 4 + L`; last entry is the end marker | ✅ (last + dataStart = file size) |
+| `dataStart`.. | blocks | Level-major (coarsest first), row-major within a level, 64×64 grid of each level record | ✅ |
 
 Level records run coarsest first. Level `k` of `n` has size `ceil(W / 2^(n-k))` × `ceil(H / 2^(n-k))`; full resolution is not a record.
 On the sample, `a/b/c` stay at 1 for the coarsest levels, then grow with level.
 GDAL reports floor-sized overviews and omits the coarsest stored level; its coarsest overview repeats every value in pairs, consistent with upsampling that level.
-Mixed endianness: integers big-endian, doubles little-endian.
+Mixed endianness: integers big-endian, doubles little-endian (block offsets are the exception: u64 little-endian).
+
+Each block: `streams - 1` u32 BE offsets (relative to the end of that header), then the streams. Level 0 blocks have 12 streams (3 bands × LL/LH/HL/HH), other levels 9 (3 bands × LH/HL/HH), band-major. Each stream starts with a mode byte: `5` = empty (1 byte), `2` and `6` = two coding methods (open). Details in `_dev/ecw-decode/FINDINGS.md`.
 
 ## 8. Reverse-engineering workflow
 
