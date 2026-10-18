@@ -1,0 +1,194 @@
+// src/io/ScratchBinaryFile.js
+//==========================================================
+// OPFS scratch files for large decoded outputs and the decoded-
+// block cache. Modelled on Kirra's ScratchBinaryFile:
+// - avoids the ~2 GiB ArrayBuffer ceiling for big region reads
+// - private per-origin sandbox, survives between reads
+// - workers get synchronous FileSystemSyncAccessHandle reads
+// Files live in OPFS directory SCRATCH_DIR. Writers and readers
+// are worker-only (sync access handles); opening is async.
+// Every function takes options.root (a directory handle) so tests
+// can pass an in-memory fake; default is navigator.storage.
+// ⚠️ OPFS sync handles hold an exclusive lock: close the writer
+// before opening a reader on the same file.
+//==========================================================
+
+import { EcwError, ERROR_CODES } from "../errors.js";
+
+/** OPFS sub-directory holding every ecw-js scratch file. */
+export var SCRATCH_DIR = "ecw-scratch";
+
+var DEFAULT_WINDOW_SIZE = 4 * 1024 * 1024;
+var DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+async function getScratchDir(options) {
+	var root = (options && options.root) || await navigator.storage.getDirectory();
+	return root.getDirectoryHandle(SCRATCH_DIR, { create: true });
+}
+
+/**
+ * Open (and empty) a scratch file for synchronous writing. Worker only.
+ * @param {string} id - Scratch file name.
+ * @param {{root?: object}} [options]
+ * @returns {Promise<{write(bytes: Uint8Array): void, writeAt(bytes: Uint8Array, pos: number): void,
+ *   truncate(n: number): void, bytesWritten(): number, close(): void}>}
+ */
+export async function openScratchSyncWriter(id, options) {
+	var dir = await getScratchDir(options);
+	var fileHandle = await dir.getFileHandle(id, { create: true });
+	var handle = await fileHandle.createSyncAccessHandle();
+	handle.truncate(0);
+	var position = 0;
+	var end = 0;
+	return {
+		write: function (bytes) {
+			handle.write(bytes, { at: position });
+			position += bytes.length;
+			end = Math.max(end, position);
+		},
+		writeAt: function (bytes, pos) {
+			handle.write(bytes, { at: pos });
+			end = Math.max(end, pos + bytes.length);
+		},
+		truncate: function (n) {
+			handle.truncate(n);
+			position = Math.min(position, n);
+			end = Math.min(end, n);
+		},
+		bytesWritten: function () {
+			return end;
+		},
+		close: function () {
+			handle.flush();
+			handle.close();
+		}
+	};
+}
+
+/**
+ * Sync source contract over an OPFS sync access handle, with a
+ * sliding read window. Create with openScratchReader().
+ */
+export function ScratchSource(handle, length, windowSize) {
+	this._handle = handle;
+	this._length = length;
+	this._window = new Uint8Array(windowSize);
+	this._view = new DataView(this._window.buffer);
+	this._windowStart = 0;
+	this._windowLength = 0;
+}
+
+function truncated(source, pos) {
+	return new EcwError(ERROR_CODES.TRUNCATED, "read past end of " + source._length + "-byte scratch file", pos);
+}
+
+// Returns the window offset of `pos`, refilling so [pos, pos + size) is resident
+function windowAt(source, pos, size) {
+	if (pos < 0 || pos + size > source._length) throw truncated(source, pos);
+	var rel = pos - source._windowStart;
+	if (rel >= 0 && rel + size <= source._windowLength) return rel;
+	var count = Math.min(source._window.length, source._length - pos);
+	source._windowLength = source._handle.read(source._window.subarray(0, count), { at: pos });
+	source._windowStart = pos;
+	return 0;
+}
+
+/** @returns {number} logical byte length */
+ScratchSource.prototype.length = function () {
+	return this._length;
+};
+
+/**
+ * Copy of bytes [start, end); may span many windows.
+ * @returns {Uint8Array}
+ */
+ScratchSource.prototype.slice = function (start, end) {
+	if (start < 0 || end < start) {
+		throw new EcwError(ERROR_CODES.INVALID_ARGUMENT, "bad slice range " + start + ".." + end);
+	}
+	if (end > this._length) throw truncated(this, end);
+	var out = new Uint8Array(end - start);
+	this._handle.read(out, { at: start });
+	return out;
+};
+
+/** @returns {number} */
+ScratchSource.prototype.getUint8 = function (pos) {
+	return this._window[windowAt(this, pos, 1)];
+};
+
+/** @returns {number} */
+ScratchSource.prototype.getUint16 = function (pos, littleEndian) {
+	return this._view.getUint16(windowAt(this, pos, 2), littleEndian);
+};
+
+/** @returns {number} */
+ScratchSource.prototype.getUint32 = function (pos, littleEndian) {
+	return this._view.getUint32(windowAt(this, pos, 4), littleEndian);
+};
+
+/** @returns {number} */
+ScratchSource.prototype.getInt32 = function (pos, littleEndian) {
+	return this._view.getInt32(windowAt(this, pos, 4), littleEndian);
+};
+
+/** @returns {number} */
+ScratchSource.prototype.getFloat64 = function (pos, littleEndian) {
+	return this._view.getFloat64(windowAt(this, pos, 8), littleEndian);
+};
+
+/** Release the sync access handle. */
+ScratchSource.prototype.close = function () {
+	this._handle.close();
+};
+
+/**
+ * Open a scratch file as a sync source. Worker only.
+ * @param {string} id
+ * @param {{byteLength?: number, windowSize?: number, root?: object}} [options]
+ *   byteLength caps the logical length (scratch files may be padded).
+ * @returns {Promise<ScratchSource>}
+ */
+export async function openScratchReader(id, options) {
+	var opts = options || {};
+	var dir = await getScratchDir(opts);
+	var fileHandle = await dir.getFileHandle(id);
+	var handle = await fileHandle.createSyncAccessHandle();
+	var size = handle.getSize();
+	var length = typeof opts.byteLength === "number" ? Math.min(opts.byteLength, size) : size;
+	return new ScratchSource(handle, length, opts.windowSize || DEFAULT_WINDOW_SIZE);
+}
+
+/**
+ * Delete a scratch file. A missing file is not an error.
+ * @param {string} id
+ * @param {{root?: object}} [options]
+ */
+export async function removeScratchFile(id, options) {
+	var dir = await getScratchDir(options);
+	try {
+		await dir.removeEntry(id);
+	} catch (err) {
+		if (!err || err.name !== "NotFoundError") throw err;
+	}
+}
+
+/**
+ * Delete scratch files last modified more than maxAgeMs ago.
+ * @param {{maxAgeMs?: number, now?: number, root?: object}} [options]
+ * @returns {Promise<number>} count removed
+ */
+export async function sweepStaleScratchFiles(options) {
+	var opts = options || {};
+	var maxAgeMs = typeof opts.maxAgeMs === "number" ? opts.maxAgeMs : DEFAULT_MAX_AGE_MS;
+	var now = typeof opts.now === "number" ? opts.now : Date.now();
+	var dir = await getScratchDir(opts);
+	var stale = [];
+	for await (var handle of dir.values()) {
+		if (handle.kind !== "file") continue;
+		var file = await handle.getFile();
+		if (now - file.lastModified > maxAgeMs) stale.push(handle.name);
+	}
+	for (var i = 0; i < stale.length; i++) await removeScratchFile(stale[i], opts);
+	return stale.length;
+}
