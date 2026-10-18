@@ -19,7 +19,8 @@
 	"scripts": {
 		"test": "node --test \"test/**/*.test.js\"",
 		"test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\"",
-		"demo": "node _dev/serve.mjs"
+		"demo": "node _dev/serve.mjs",
+		"check:private": "node _dev/checkPrivate.mjs"
 	},
 	"keywords": [
 		"ecw",
