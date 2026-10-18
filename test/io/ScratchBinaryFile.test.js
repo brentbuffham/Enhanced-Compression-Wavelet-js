@@ -120,3 +120,27 @@ test("sweep removes only files older than maxAgeMs", async function () {
 	assert.equal(dir.fileBytes("old"), null);
 	assert.ok(dir.fileBytes("new"));
 });
+
+test("a reader cannot open while the writer still holds the file", async function () {
+	var root = createFakeRoot();
+	var w = await openScratchSyncWriter("a", { root: root });
+	w.write(ramp(4));
+	await assert.rejects(openScratchReader("a", { root: root }), { name: "NoModificationAllowedError" });
+	w.close();
+	assert.equal((await openScratchReader("a", { root: root })).length(), 4);
+});
+
+test("sweep skips a locked stale file and still removes the others", async function () {
+	var root = createFakeRoot();
+	await fileWith(root, "stale1", ramp(4));
+	await fileWith(root, "stale2", ramp(4));
+	var now = 1000000000000;
+	var dir = await root.getDirectoryHandle(SCRATCH_DIR);
+	dir.setLastModified("stale1", now - 25 * 3600 * 1000);
+	dir.setLastModified("stale2", now - 25 * 3600 * 1000);
+	var held = await openScratchReader("stale1", { root: root });
+	assert.equal(await sweepStaleScratchFiles({ root: root, now: now }), 1);
+	assert.ok(dir.fileBytes("stale1"));
+	assert.equal(dir.fileBytes("stale2"), null);
+	held.close();
+});

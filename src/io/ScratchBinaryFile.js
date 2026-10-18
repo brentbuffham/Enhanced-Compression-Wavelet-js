@@ -20,6 +20,8 @@ export var SCRATCH_DIR = "ecw-scratch";
 
 var DEFAULT_WINDOW_SIZE = 4 * 1024 * 1024;
 var DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+// Raised by OPFS when another tab or worker holds a sync handle on the file
+var LOCKED_ERRORS = ["NoModificationAllowedError", "InvalidModificationError"];
 
 async function getScratchDir(options) {
 	var root = (options && options.root) || await navigator.storage.getDirectory();
@@ -175,6 +177,7 @@ export async function removeScratchFile(id, options) {
 
 /**
  * Delete scratch files last modified more than maxAgeMs ago.
+ * Files still locked by another tab or worker are skipped, not fatal.
  * @param {{maxAgeMs?: number, now?: number, root?: object}} [options]
  * @returns {Promise<number>} count removed
  */
@@ -189,6 +192,14 @@ export async function sweepStaleScratchFiles(options) {
 		var file = await handle.getFile();
 		if (now - file.lastModified > maxAgeMs) stale.push(handle.name);
 	}
-	for (var i = 0; i < stale.length; i++) await removeScratchFile(stale[i], opts);
-	return stale.length;
+	var removed = 0;
+	for (var i = 0; i < stale.length; i++) {
+		try {
+			await removeScratchFile(stale[i], opts);
+			removed++;
+		} catch (err) {
+			if (!err || LOCKED_ERRORS.indexOf(err.name) < 0) throw err;
+		}
+	}
+	return removed;
 }

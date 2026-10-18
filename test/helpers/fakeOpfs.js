@@ -3,19 +3,27 @@
 // In-memory stand-in for an OPFS directory handle, with
 // FileSystemSyncAccessHandle-like file access. Test-only.
 // Missing entries raise DOMException "NotFoundError" like OPFS.
+// Sync access handles take an exclusive lock: a second handle, or
+// removeEntry on a locked file, raises "NoModificationAllowedError".
 //==========================================================
 
 function notFound(name) {
 	return new DOMException("not found: " + name, "NotFoundError");
 }
 
+function locked(name) {
+	return new DOMException("locked: " + name, "NoModificationAllowedError");
+}
+
 function createFileEntry(name) {
-	var entry = { kind: "file", name: name, data: new Uint8Array(0), lastModified: Date.now() };
+	var entry = { kind: "file", name: name, data: new Uint8Array(0), lastModified: Date.now(), locked: false };
 	entry.handle = {
 		kind: "file",
 		name: name,
 		getFile: async function () { return { size: entry.data.length, lastModified: entry.lastModified }; },
 		createSyncAccessHandle: async function () {
+			if (entry.locked) throw locked(name);
+			entry.locked = true;
 			return {
 				read: function (buf, opts) {
 					var at = (opts && opts.at) || 0;
@@ -42,7 +50,7 @@ function createFileEntry(name) {
 				},
 				getSize: function () { return entry.data.length; },
 				flush: function () {},
-				close: function () {}
+				close: function () { entry.locked = false; }
 			};
 		}
 	};
@@ -72,7 +80,10 @@ export function createFakeRoot() {
 			return entries.get(name).handle;
 		},
 		removeEntry: async function (name) {
-			if (!entries.delete(name)) throw notFound(name);
+			var entry = entries.get(name);
+			if (!entry) throw notFound(name);
+			if (entry.locked) throw locked(name);
+			entries.delete(name);
 		},
 		values: async function* () {
 			for (var entry of entries.values()) yield entry.handle;
