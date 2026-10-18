@@ -30,6 +30,9 @@ var imageMode = false;
 var refineSeq = 0;
 var refineBusy = false;
 var refinePending = false;
+// Post-steps applied from the Clip tab ({ transparentBelow?, clipPolygon? }), reused by every
+// zoom refinement so the sharp detail layer stays transparent and clipped like the overview
+var postSteps = null;
 
 //----------------------------------------------------------
 // Worker jobs
@@ -120,6 +123,7 @@ async function openFileInDemo(f, fromKept) {
 	file = f;
 	opened = null;
 	basePicture = null;
+	postSteps = null;
 	lastHoverBlock = -1;
 	viewer.clearPolygon();
 	$("fileName").textContent = f.name + " (" + formatBytes(f.size) + ")";
@@ -293,23 +297,31 @@ function applyPostSteps() {
 	var rgba = basePicture.rgba.slice();
 	var threshold = Number($("thresholdInput").value);
 	var calls = [];
+	var steps = {};
 	try {
 		if ($("thresholdInput").value !== "") {
 			applyTransparency(rgba, threshold);
+			steps.transparentBelow = threshold;
 			calls.push("applyTransparency(rgba, " + threshold + ");");
 		}
 		if (viewer.polygon.length >= 3) {
 			clipToPolygon(rgba, basePicture.width, basePicture.height, basePicture.bounds, [viewer.polygon]);
+			steps.clipPolygon = [viewer.polygon.slice()];
 			calls.push("clipToPolygon(rgba, " + basePicture.width + ", " + basePicture.height + ", bounds, [ring]);");
 		}
 	} catch (err) {
 		setError(err);
 		return;
 	}
+	postSteps = Object.keys(steps).length ? steps : null;
 	var cleared = 0;
 	for (var i = 3; i < rgba.length; i += 4) if (rgba[i] === 0) cleared++;
 	viewer.setPicture({ rgba: rgba, width: basePicture.width, height: basePicture.height, bounds: basePicture.bounds, smooth: basePicture.smooth }, true);
 	how(calls.join("\n") || "// nothing to apply", { transparentPixels: cleared, of: rgba.length / 4 });
+	// setPicture dropped the zoom detail layer: decode it again with the same steps
+	// (refineSeq++ discards any decode still in flight without them)
+	refineSeq++;
+	refineView();
 }
 
 //----------------------------------------------------------
@@ -342,7 +354,7 @@ async function refineView() {
 	refineBusy = true;
 	var t0 = performance.now();
 	try {
-		var img = await run("read", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, outWidth: outW, outHeight: outH, resample: $("readResample").value }, true);
+		var img = await run("read", Object.assign({ x: x0, y: y0, width: x1 - x0, height: y1 - y0, outWidth: outW, outHeight: outH, resample: $("readResample").value }, postSteps), true);
 		if (seq === refineSeq) {
 			viewer.setDetail({ rgba: img.data, width: img.width, height: img.height, bounds: img.bounds });
 			setProgress(1, "detail " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
@@ -384,6 +396,7 @@ async function runRead() {
 	try {
 		var img = await run("read", opts);
 		basePicture = { rgba: img.data, width: img.width, height: img.height, bounds: img.bounds, smooth: true };
+		postSteps = null;
 		viewer.setPicture({ rgba: img.data.slice(), width: img.width, height: img.height, bounds: img.bounds, smooth: true });
 		imageMode = true;
 		setProgress(1, "decoded " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
@@ -481,7 +494,10 @@ $("drawButton").addEventListener("click", function () { viewer.startPolygon(); $
 $("clearPolygon").addEventListener("click", function () { viewer.clearPolygon(); $("drawButton").classList.remove("active"); });
 $("applyClip").addEventListener("click", applyPostSteps);
 $("resetClip").addEventListener("click", function () {
+	postSteps = null;
 	if (basePicture) viewer.setPicture({ rgba: basePicture.rgba.slice(), width: basePicture.width, height: basePicture.height, bounds: basePicture.bounds, smooth: basePicture.smooth }, true);
+	refineSeq++;
+	refineView();
 });
 $("readButton").addEventListener("click", runRead);
 $("wholeButton").addEventListener("click", function () { fillWhole(); runRead(); });
