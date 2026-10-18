@@ -1,0 +1,43 @@
+{
+	"name": "ecw-js",
+	"version": "0.0.1",
+	"description": "Zero-dependency JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, for the browser and Node.",
+	"type": "module",
+	"exports": {
+		".": "./src/index.js"
+	},
+	"files": [
+		"src",
+		"README.md",
+		"LICENSE",
+		"CHANGELOG.md"
+	],
+	"sideEffects": false,
+	"engines": {
+		"node": ">=22"
+	},
+	"scripts": {
+		"test": "node --test \"test/**/*.test.js\"",
+		"test:coverage": "node --test --experimental-test-coverage \"test/**/*.test.js\""
+	},
+	"keywords": [
+		"ecw",
+		"ermapper",
+		"erdas",
+		"wavelet",
+		"raster",
+		"orthophoto",
+		"gis",
+		"opfs"
+	],
+	"author": "Brent Buffham (https://kirra-design.com)",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/brentbuffham/Enhanced-Compression-Wavelet-js.git"
+	},
+	"bugs": {
+		"url": "https://github.com/brentbuffham/Enhanced-Compression-Wavelet-js/issues"
+	},
+	"homepage": "https://github.com/brentbuffham/Enhanced-Compression-Wavelet-js#readme"
+}
