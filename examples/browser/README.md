@@ -11,7 +11,7 @@ Drop an ECW file onto the page to see the library at work. Files are read locall
 
 - **Info**: `openEcw` and `pixelWindowToBounds`. Header, georeferencing, levels.
 - **Blocks**: `parseBlockIndex`, `blockGrid`, `levelEntryWindow`, `blockByteRange`, `splitBlockStreams`. A block-size map per level, hover to inspect a block's streams, and stream-mode sampling.
-- **Clip**: `clipToPolygon` and `applyTransparency` on the current picture.
+- **Clip**: `clipToPolygon`, `applyTransparency` and `applyColorKey` on the current picture, with a colour picker that reads the clicked pixel at full resolution.
 - **Read**: `readRegion` in the Worker. Opening a file decodes a whole-image view at screen size; any window can be decoded at any output size. "Whole image" refills the form.
 - **Scratch**: `listScratchFiles`, `getScratchFile`, `removeScratchFile`, `sweepStaleScratchFiles`. Browser storage (OPFS) used, kept files, scratch files.
 

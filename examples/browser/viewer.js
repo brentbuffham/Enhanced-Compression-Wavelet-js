@@ -1,7 +1,7 @@
 // examples/browser/viewer.js
 //==========================================================
 // Canvas viewer: shows one RGBA "picture" spanning map bounds,
-// with wheel zoom, drag pan, hover reporting and a polygon tool.
+// with wheel zoom, drag pan, hover reporting, a polygon tool and a point picker.
 // Block maps are drawn nearest-neighbour so they stay crisp; decoded
 // images (picture.smooth) are drawn with high-quality smoothing, or
 // pixel for pixel when the view is at scale 1.
@@ -29,6 +29,7 @@ export function Viewer(canvas, callbacks) {
 	this.view = null;
 	this.polygon = [];
 	this.drawing = false;
+	this.picking = null;
 	this.detail = null;
 	this._bind();
 	this._resize();
@@ -193,6 +194,15 @@ Viewer.prototype.clearPolygon = function () {
 	this.draw();
 };
 
+/**
+ * Wait for one click on the map and pass its map coordinates to onPick.
+ * @param {function({x:number, y:number})} onPick
+ */
+Viewer.prototype.startPick = function (onPick) {
+	this.picking = onPick;
+	this.canvas.classList.add("drawing");
+};
+
 Viewer.prototype._eventPoint = function (event) {
 	var rect = this.canvas.getBoundingClientRect();
 	return { x: (event.clientX - rect.left) * this.dpr, y: (event.clientY - rect.top) * this.dpr };
@@ -215,7 +225,7 @@ Viewer.prototype._bind = function () {
 		self._viewChanged();
 	}, { passive: false });
 	this.canvas.addEventListener("pointerdown", function (event) {
-		if (!self.view || self.drawing) return;
+		if (!self.view || self.drawing || self.picking) return;
 		drag = { start: self._eventPoint(event), offsetX: self.view.offsetX, offsetY: self.view.offsetY };
 		self.canvas.setPointerCapture(event.pointerId);
 		self.canvas.classList.add("panning");
@@ -247,6 +257,14 @@ Viewer.prototype._bind = function () {
 		if (self.callbacks.onHover) self.callbacks.onHover(null);
 	});
 	this.canvas.addEventListener("click", function (event) {
+		if (self.picking && self.view) {
+			var onPick = self.picking;
+			self.picking = null;
+			if (!self.drawing) self.canvas.classList.remove("drawing");
+			var at = self._eventPoint(event);
+			onPick(screenToMap(self.view, at.x, at.y));
+			return;
+		}
 		if (!self.drawing || !self.view) return;
 		var p = self._eventPoint(event);
 		var m = screenToMap(self.view, p.x, p.y);

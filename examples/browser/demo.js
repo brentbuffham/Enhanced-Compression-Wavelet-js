@@ -6,7 +6,7 @@
 // writes the library call it made into "How it works".
 //==========================================================
 
-import { openEcw, pixelWindowToBounds, applyTransparency, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles, blockCacheUsage, clearBlockCache } from "../../src/index.js";
+import { openEcw, pixelWindowToBounds, applyTransparency, applyColorKey, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles, blockCacheUsage, clearBlockCache } from "../../src/index.js";
 import { blockSizeColor, sizeRange } from "./lib/colorScale.js";
 import { levelPictureBounds, KEPT_DIR } from "./lib/demoCore.js";
 import { Viewer } from "./viewer.js";
@@ -30,7 +30,7 @@ var imageMode = false;
 var refineSeq = 0;
 var refineBusy = false;
 var refinePending = false;
-// Post-steps applied from the Clip tab ({ transparentBelow?, clipPolygon? }), reused by every
+// Post-steps applied from the Clip tab ({ transparentBelow?, transparentAbove?, transparentColor?, clipPolygon? }), reused by every
 // zoom refinement so the sharp detail layer stays transparent and clipped like the overview
 var postSteps = null;
 
@@ -141,7 +141,7 @@ async function openFileInDemo(f, fromKept) {
 	$("viewerEmpty").classList.add("hidden");
 	renderInfo();
 	setStats();
-	["levelSelect", "sampleButton", "drawButton", "clearPolygon", "applyClip", "resetClip", "readButton", "wholeButton"].forEach(function (id) { $(id).disabled = false; });
+	["levelSelect", "sampleButton", "drawButton", "clearPolygon", "pickButton", "applyClip", "resetClip", "readButton", "wholeButton"].forEach(function (id) { $(id).disabled = false; });
 	var select = $("levelSelect");
 	select.innerHTML = opened.grid.map(function (g) {
 		var lv = opened.levels[g.level];
@@ -292,6 +292,25 @@ function onPolygon(points) {
 	$("drawButton").classList.remove("active");
 }
 
+// Read the clicked pixel at full resolution and make it the colour key
+async function onPick(m) {
+	$("pickButton").classList.remove("active");
+	var info = reader.info;
+	var x = Math.floor((m.x - info.originX) / info.cellSizeX);
+	var y = Math.floor((m.y - info.originY) / info.cellSizeY);
+	if (x < 0 || y < 0 || x >= info.width || y >= info.height) return;
+	var opts = { x: x, y: y, width: 1, height: 1 };
+	try {
+		var img = await run("read", opts, true);
+		var rgb = Array.from(img.data.subarray(0, 3));
+		$("keyColor").value = "#" + rgb.map(function (v) { return v.toString(16).padStart(2, "0"); }).join("");
+		$("keyToggle").checked = true;
+		how("var img = await ecw.readRegion(" + JSON.stringify(opts) + ");\nimg.data.subarray(0, 3);", { rgb: rgb, hex: $("keyColor").value });
+	} catch (err) {
+		setError(err);
+	}
+}
+
 function applyPostSteps() {
 	if (!basePicture) return;
 	var rgba = basePicture.rgba.slice();
@@ -303,6 +322,20 @@ function applyPostSteps() {
 			applyTransparency(rgba, threshold);
 			steps.transparentBelow = threshold;
 			calls.push("applyTransparency(rgba, " + threshold + ");");
+		}
+		if ($("aboveInput").value !== "") {
+			var above = Number($("aboveInput").value);
+			if (!Number.isInteger(above) || above < 0 || above > 255) throw { code: "INVALID_ARGUMENT", message: "transparentAbove must be an integer 0-255" };
+			// transparentAbove N is the colour key white minus (255 - N)
+			applyColorKey(rgba, { color: [255, 255, 255], below: 255 - above });
+			steps.transparentAbove = above;
+			calls.push("applyColorKey(rgba, { color: [255, 255, 255], below: " + (255 - above) + " }); // transparentAbove: " + above);
+		}
+		if ($("keyToggle").checked) {
+			var key = { color: $("keyColor").value, below: Number($("keyBelow").value), above: Number($("keyAbove").value) };
+			applyColorKey(rgba, key);
+			steps.transparentColor = key;
+			calls.push("applyColorKey(rgba, " + JSON.stringify(key) + "); // transparentColor");
 		}
 		if (viewer.polygon.length >= 3) {
 			clipToPolygon(rgba, basePicture.width, basePicture.height, basePicture.bounds, [viewer.polygon]);
@@ -491,6 +524,7 @@ $("fileInput").addEventListener("change", function (e) { if (e.target.files[0]) 
 $("levelSelect").addEventListener("change", function (e) { showLevel(Number(e.target.value)); });
 $("sampleButton").addEventListener("click", sampleLevel);
 $("drawButton").addEventListener("click", function () { viewer.startPolygon(); $("drawButton").classList.add("active"); });
+$("pickButton").addEventListener("click", function () { viewer.startPick(onPick); $("pickButton").classList.add("active"); });
 $("clearPolygon").addEventListener("click", function () { viewer.clearPolygon(); $("drawButton").classList.remove("active"); });
 $("applyClip").addEventListener("click", applyPostSteps);
 $("resetClip").addEventListener("click", function () {

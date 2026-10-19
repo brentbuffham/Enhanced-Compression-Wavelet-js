@@ -73,6 +73,19 @@
 				<label class="field">transparentBelow
 					<input type="number" id="thresholdInput" min="0" max="255" value="8">
 				</label>
+				<label class="field">transparentAbove
+					<input type="number" id="aboveInput" min="0" max="255" placeholder="off">
+				</label>
+				<label class="check"><input type="checkbox" id="keyToggle"> transparentColor</label>
+				<div class="row">
+					<input type="color" id="keyColor" value="#000000" title="colour">
+					<button class="button" id="pickButton" disabled>Pick colour</button>
+				</div>
+				<div class="form-grid">
+					<label>below <input type="number" id="keyBelow" min="0" max="255" value="6"></label>
+					<label>above <input type="number" id="keyAbove" min="0" max="255" value="6"></label>
+				</div>
+				<p class="muted small">Pick colour, then click the map: it reads that pixel at full resolution. Pixels within below..above of it on every channel become transparent.</p>
 				<div class="row">
 					<button class="button" id="applyClip" disabled>Apply</button>
 					<button class="button" id="resetClip" disabled>Reset picture</button>
