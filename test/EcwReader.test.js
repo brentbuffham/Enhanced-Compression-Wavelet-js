@@ -45,7 +45,7 @@ test("close is idempotent", async function () {
 test("public exports", async function () {
 	var mod = await import("../src/index.js");
 	assert.deepEqual(Object.keys(mod).sort(), ["BlobSource", "BlockCache", "CACHE_DIR", "ERROR_CODES", "EcwError", "MemorySource", "SCRATCH_DIR", "STREAM_MODE", "VERSION",
-		"applyStretch", "applyTransparency", "blockByteRange", "blockCacheUsage", "blockEntryWindow", "blockGrid", "clearBlockCache", "clipToPolygon", "decodeStream", "fileFingerprint", "getScratchFile", "levelEntryWindow", "listScratchFiles", "openEcw",
+		"applyColorKey", "applyStretch", "applyTransparency", "blockByteRange", "blockCacheUsage", "blockEntryWindow", "blockGrid", "clearBlockCache", "clipToPolygon", "decodeStream", "fileFingerprint", "getScratchFile", "levelEntryWindow", "listScratchFiles", "openEcw",
 		"openScratchReader", "openScratchSyncWriter",
 		"parseBlockIndex", "parseHeader", "parseLevels", "pixelWindowToBounds", "removeScratchFile", "splitBlockStreams", "stretchFromPixels", "sweepStaleScratchFiles",
 		"synthesizeWindow", "yuvToRgba"]);

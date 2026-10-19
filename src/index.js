@@ -18,6 +18,7 @@ export { BlobSource } from "./io/BlobSource.js";
 export { parseBlockIndex, blockGrid, blockEntryWindow, levelEntryWindow, blockByteRange } from "./format/EcwBlockIndex.js";
 export { splitBlockStreams, STREAM_MODE } from "./format/EcwBlockFrame.js";
 export { applyTransparency } from "./post/applyTransparency.js";
+export { applyColorKey } from "./post/applyColorKey.js";
 export { clipToPolygon } from "./post/clipToPolygon.js";
 export { SCRATCH_DIR, openScratchSyncWriter, openScratchReader, removeScratchFile, sweepStaleScratchFiles, listScratchFiles, getScratchFile } from "./io/ScratchBinaryFile.js";
 export { decodeStream } from "./codec/streams.js";

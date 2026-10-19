@@ -18,7 +18,7 @@ import { pixelWindowToBounds } from "./format/georef.js";
 import { createDecodeContext, decodeWindow, imageLevelSize, countWindowBlocks } from "./decode/RegionDecoder.js";
 import { sampleWindow } from "./decode/sampleWindow.js";
 import { yuvToRgba, greyToRgba, bandsToRgba } from "./codec/colour.js";
-import { applyTransparency } from "./post/applyTransparency.js";
+import { applyColorKey, colorKeysFromOptions } from "./post/applyColorKey.js";
 import { clipToPolygon } from "./post/clipToPolygon.js";
 import { applyStretch, stretchFromPixels } from "./post/stretch.js";
 import { openScratchSyncWriter, openScratchReader, removeScratchFile } from "./io/ScratchBinaryFile.js";
@@ -80,12 +80,15 @@ function isCount(v) {
 /**
  * Decode a region to RGBA.
  * @param {{x:number, y:number, width:number, height:number, outWidth?:number, outHeight?:number,
- *   resample?:"nearest"|"average", transparentBelow?:number, clipPolygon?:Array,
+ *   resample?:"nearest"|"average", transparentBelow?:number, transparentAbove?:number,
+ *   transparentColor?:{color:string|number[], below?:number, above?:number}|Array, clipPolygon?:Array,
  *   stretch?:{min:number[], max:number[]},
  *   onProgress?:function(number, string), signal?:AbortSignal, maxOutputBytes?:number}} opts
  *   x, y, width, height are full-resolution pixels; outWidth/outHeight default to width/height.
  *   resample "nearest" (default) matches GDAL / the ECW SDK exactly; "average" box-averages
  *   the decoded level for smooth downsampling between levels.
+ *   transparentBelow N clears pixels whose R, G and B are all <= N; transparentAbove N all >= N;
+ *   transparentColor clears pixels within below..above of a colour ("#rrggbb" or [r, g, b]), one or a list.
  *   stretch (optional, e.g. from computeStretch) maps each band's min..max to 0..255.
  * @returns {Promise<{data:Uint8ClampedArray, width:number, height:number, level:number,
  *   bounds:{minX:number, minY:number, maxX:number, maxY:number}}>}
@@ -116,13 +119,14 @@ EcwReader.prototype._plan = function (opts) {
 	var resample = o.resample === undefined ? "nearest" : o.resample;
 	if (resample !== "nearest" && resample !== "average") throw invalid("resample must be \"nearest\" or \"average\"");
 	if (o.stretch !== undefined) applyStretch(new Uint8ClampedArray(0), o.stretch);
+	var colorKeys = colorKeysFromOptions(o);
 	if (o.signal && o.signal.aborted) throw new EcwError(ERROR_CODES.ABORTED, "decode aborted");
 	// Coarsest level still at least as sharp as the output
 	var factor = Math.min(o.width / outW, o.height / outH);
 	var drop = factor >= 1 ? Math.min(h.levelCount, Math.floor(Math.log2(factor))) : 0;
 	var level = h.levelCount - drop;
 	return {
-		o: o, outW: outW, outH: outH, resample: resample, level: level, scale: Math.pow(2, drop),
+		o: o, outW: outW, outH: outH, resample: resample, level: level, scale: Math.pow(2, drop), colorKeys: colorKeys,
 		size: imageLevelSize(h, this._levels, level),
 		bounds: pixelWindowToBounds(this.info, o.x, o.y, o.width, o.height)
 	};
@@ -163,7 +167,7 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	if (h.bands >= 3 && h.colorSpace === "yuv") yuvToRgba(sampled[0], sampled[1], sampled[2], data);
 	else if (h.bands >= 3) bandsToRgba(sampled[0], sampled[1], sampled[2], data);
 	else greyToRgba(sampled[0], data);
-	if (o.transparentBelow !== undefined) applyTransparency(data, o.transparentBelow);
+	if (plan.colorKeys) applyColorKey(data, plan.colorKeys);
 	if (o.stretch !== undefined) applyStretch(data, o.stretch);
 	if (o.clipPolygon) clipToPolygon(data, outW, plan.outH, plan.bounds, o.clipPolygon, oy0);
 	return data;

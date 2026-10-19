@@ -77,6 +77,23 @@ test("transparentBelow and clipPolygon apply to the output", async function () {
 	assert.equal(pixel(clipped, 60, 40)[3], 0);
 });
 
+test("transparentAbove and transparentColor apply to the output", async function () {
+	// the constant image is [101, 100, 101]
+	var ecw = await openEcw(file());
+	assert.equal(pixel(await ecw.readRegion({ x: 0, y: 0, width: 8, height: 8, transparentAbove: 100 }), 3, 3)[3], 0);
+	assert.equal(pixel(await ecw.readRegion({ x: 0, y: 0, width: 8, height: 8, transparentAbove: 101 }), 3, 3)[3], 255);
+	assert.equal(pixel(await ecw.readRegion({ x: 0, y: 0, width: 8, height: 8, transparentColor: { color: "#656465" } }), 3, 3)[3], 0);
+	assert.equal(pixel(await ecw.readRegion({ x: 0, y: 0, width: 8, height: 8, transparentColor: { color: [102, 100, 101] } }), 3, 3)[3], 255);
+	assert.equal(pixel(await ecw.readRegion({ x: 0, y: 0, width: 8, height: 8, transparentColor: { color: [102, 100, 101], below: 1 } }), 3, 3)[3], 0);
+});
+
+test("bad transparency options throw before decoding", async function () {
+	var ecw = await openEcw(file());
+	var progressed = false;
+	await assert.rejects(ecw.readRegion({ x: 0, y: 0, width: 8, height: 8, transparentColor: { color: "red" }, onProgress: function () { progressed = true; } }), { code: "INVALID_ARGUMENT" });
+	assert.equal(progressed, false);
+});
+
 test("progress ends at 1", async function () {
 	var ecw = await openEcw(file());
 	var calls = [];

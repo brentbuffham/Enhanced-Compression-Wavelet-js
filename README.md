@@ -77,6 +77,8 @@ var img = await ecw.readRegion({
 	outWidth: 1024, outHeight: 1024,         // picks the right resolution level
 	resample: "average",                     // optional: "nearest" (default, SDK-exact) or "average" (smooth)
 	transparentBelow: 8,                     // optional: near-black becomes transparent (3 clears the flat background, 8 also the smeared footprint edge)
+	transparentAbove: 250,                   // optional: near-white becomes transparent
+	transparentColor: { color: "#3a5f2b", below: 6, above: 6 }, // optional: a colour ± tolerance (or a list of them)
 	clipPolygon: [[[x1, y1], [x2, y2], [x3, y3]]] // optional: map-coordinate rings
 });
 // { data: Uint8ClampedArray (RGBA), width, height, level, bounds: { minX, minY, maxX, maxY } }

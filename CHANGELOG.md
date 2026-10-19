@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `transparentAbove: N` clears pixels whose R, G and B are all ≥ N (white collars, scanned-map margins).
+- `transparentColor: { color, below, above }` clears pixels within a tolerance of a colour (`"#rrggbb"` or `[r, g, b]`); pass a list for several colours. Also exported as `applyColorKey(rgba, keys)`.
+- All transparency options combine and are checked before decoding starts.
+- Demo: a colour picker on the Clip tab, and a `transparentAbove` box.
+
 ## 0.1.0 (2026-10-19)
 
 First release. Reads ECW version 2 files in the browser and in Node, bit for bit the same as the ECW SDK through GDAL on the files tested so far.

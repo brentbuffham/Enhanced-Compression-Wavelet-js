@@ -32,7 +32,9 @@ var CASES = [
 	{ name: "downsampled nearest", opts: { x: 3, y: 5, width: 50, height: 40, outWidth: 19, outHeight: 13 } },
 	{ name: "downsampled average", opts: { x: 3, y: 5, width: 50, height: 40, outWidth: 19, outHeight: 13, resample: "average" } },
 	{ name: "clip and transparency", opts: { x: 0, y: 0, width: 64, height: 48, transparentBelow: 90,
-		clipPolygon: [[[1000.25, 5000.75], [1030.25, 5000.75], [1010.25, 4980.75]]] } }
+		clipPolygon: [[[1000.25, 5000.75], [1030.25, 5000.75], [1010.25, 4980.75]]] } },
+	{ name: "transparentAbove and transparentColor", opts: { x: 0, y: 0, width: 64, height: 48, transparentAbove: 200,
+		transparentColor: [{ color: [90, 90, 90], below: 20, above: 20 }] } }
 ];
 
 CASES.forEach(function (c) {
