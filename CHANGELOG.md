@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-10-19)
 
 - `transparentAbove: N` clears pixels whose R, G and B are all ≥ N (white collars, scanned-map margins).
 - `transparentColor: { color, below, above }` clears pixels within a tolerance of a colour (`"#rrggbb"` or `[r, g, b]`); pass a list for several colours. Also exported as `applyColorKey(rgba, keys)`.
