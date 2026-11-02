@@ -10,7 +10,7 @@ Everything here comes from the bytes of real ECW files and from comparing decode
 
 ## Conventions
 
-- Integers are big-endian, except inside the block index and the coefficient streams, which are little-endian (noted where they occur).
+- Integers are big-endian, except the block offsets and the coefficient streams, which are little-endian (noted where they occur). The block index mixes the two: its length is big-endian, its offsets little-endian.
 - Doubles are IEEE 754, little-endian.
 - "Level record k" is the k-th entry in the level table, coarsest first. "Image level j" is the picture reconstructed at that resolution (see [Reconstruction](#reconstruction)).
 
@@ -87,7 +87,7 @@ Right after the level table, at `E = 0x59 + 21·n`:
 
 | Offset | Type | Meaning |
 |---|---|---|
-| `E` | u32 | Length `L` of the index body that follows |
+| `E` | u32 BE | Length `L` of the index body that follows |
 | `E + 4` | u8 | Unknown flag (`1` seen) |
 | `E + 5` | u64 LE × count | Block offsets relative to `D = E + 4 + L`, then one end marker |
 

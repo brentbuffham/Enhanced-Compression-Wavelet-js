@@ -147,7 +147,7 @@ var worker = new Worker(new URL("ecw-js/worker", import.meta.url), { type: "modu
 worker.onmessage = function (event) {
 	var msg = event.data; // { id, type: "progress", fraction, label } | { id, type: "result", result } | { id, type: "error", code, message }
 };
-worker.postMessage({ id: 1, type: "open", payload: { blob: file } });            // result: ecw.info
+worker.postMessage({ id: 1, type: "open", payload: { blob: file } });            // result: ecw.info; add cache: { opfs: true } as in openEcw
 worker.postMessage({ id: 2, type: "readRegion", payload: { x: 0, y: 0, width: 4096, height: 4096, outWidth: 1024, outHeight: 1024 } });
 worker.postMessage({ id: 3, type: "readRegionToScratch", payload: { /* same options */ } }); // result: { scratchId, byteLength, ... }
 worker.postMessage({ id: 4, type: "abort", payload: { id: 2 } });                 // job 2 ends with error code ABORTED
@@ -155,6 +155,8 @@ worker.postMessage({ id: 5, type: "close" });
 ```
 
 The file is structured-cloned into the Worker without copying its bytes, and pixel buffers come back transferred. Read a scratch result on the main thread with `getScratchFile(scratchId)`.
+
+A Worker holds one file at a time. Sending `open` or `close` aborts the reads still running on the current file (they end with `ABORTED`), waits for them, then closes it. Closing deletes that file's scratch results, so copy out what you need first. Each `id` must be unique among running jobs; a duplicate gets `INVALID_ARGUMENT`.
 
 ## Errors
 
@@ -168,10 +170,10 @@ Everything throws or rejects with an `EcwError`. Branch on `error.code`; `error.
 | `BAD_LEVEL_TABLE` | The resolution-level table is inconsistent |
 | `BAD_BLOCK_INDEX` | The block index is inconsistent (wrong length, falling offsets, wrong entry count) |
 | `BAD_BLOCK` | A block's internal stream table is inconsistent |
-| `INVALID_ARGUMENT` | A bad argument, such as a non-Blob or a reversed range |
+| `INVALID_ARGUMENT` | A bad argument, such as a non-Blob or a reversed range, or a read on a closed reader |
 | `OUTPUT_TOO_LARGE` | A region read would exceed the in-memory limit |
 | `ABORTED` | The read was cancelled with an `AbortSignal` |
-| `NOT_IMPLEMENTED` | A feature that is not available yet (`readRegionToScratch`) |
+| `NOT_IMPLEMENTED` | Reserved for features that aren't available yet. This version doesn't raise it. |
 
 ## Scope
 

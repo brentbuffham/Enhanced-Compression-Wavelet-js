@@ -22,6 +22,9 @@ function progressFor(id) {
 var handlers = {
 	open: async function (payload, onProgress) {
 		var opened = await openFile(payload.file, onProgress);
+		// release the previous file's cache and scratch files
+		if (state) await state.reader.close();
+		state = null;
 		state = { file: payload.file, opened: opened, reader: await openEcw(payload.file, payload.opfsCache ? { cache: { opfs: true } } : undefined) };
 		return opened;
 	},
@@ -46,6 +49,7 @@ var handlers = {
 self.onmessage = async function (event) {
 	var msg = event.data;
 	try {
+		if (!Object.prototype.hasOwnProperty.call(handlers, msg.type)) throw new Error("unknown message type " + msg.type);
 		if (msg.type !== "open" && !state) throw new Error("no file open");
 		var result = await handlers[msg.type](msg.payload, progressFor(msg.id));
 		var transfer = result && result.sizes ? [result.sizes.buffer] : result && result.data ? [result.data.buffer] : [];

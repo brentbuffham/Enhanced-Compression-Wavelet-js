@@ -124,5 +124,6 @@ export function decodeMode2(bytes, count) {
 export function decodeStream(stream, count) {
 	if (stream.mode === STREAM_MODE.EMPTY) return new Int32Array(count);
 	if (stream.mode === STREAM_MODE.CODED_B) return decodeMode6(stream.bytes, count);
-	return decodeMode2(stream.bytes, count);
+	if (stream.mode === STREAM_MODE.CODED_A) return decodeMode2(stream.bytes, count);
+	throw bad("unknown stream mode " + stream.mode);
 }

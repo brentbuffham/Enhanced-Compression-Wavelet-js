@@ -94,6 +94,46 @@ test("abort cancels a running job with ABORTED", async function () {
 	assert.equal(res.msg.code, "ABORTED");
 });
 
+test("open forwards the cache option to openEcw", async function () {
+	var h = harness();
+	var bad = await h.send("open", { blob: file(), cache: 5 });
+	assert.equal(bad.msg.code, "INVALID_ARGUMENT");
+	assert.match(bad.msg.message, /cache/);
+	assert.equal((await h.send("open", { blob: file(), cache: false })).msg.type, "result");
+});
+
+test("a job id that is still running is rejected, and the running job keeps its abort", async function () {
+	var h = harness();
+	await h.send("open", { blob: file() });
+	var job = h.handle({ id: 70, type: "readRegion", payload: { x: 0, y: 0, width: 64, height: 48 } });
+	await h.handle({ id: 70, type: "readRegion", payload: { x: 0, y: 0, width: 1, height: 1 } });
+	var dup = h.messages.filter(function (m) { return m.msg.id === 70 && m.msg.type === "error"; })[0];
+	assert.equal(dup.msg.code, "INVALID_ARGUMENT");
+	assert.match(dup.msg.message, /already running/);
+	await h.handle({ id: 71, type: "abort", payload: { id: 70 } });
+	await job;
+	var res = h.messages.filter(function (m) { return m.msg.id === 70 && m.msg.type !== "progress"; }).pop();
+	assert.equal(res.msg.code, "ABORTED");
+});
+
+test("open and close abort running reads and wait for them before closing the reader", async function () {
+	var h = harness();
+	await h.send("open", { blob: file() });
+	var read = h.handle({ id: 80, type: "readRegion", payload: { x: 0, y: 0, width: 64, height: 48 } });
+	var scratch = h.handle({ id: 81, type: "readRegionToScratch", payload: { x: 0, y: 0, width: 64, height: 48, stripBytes: 64 * 4 * 4, scratch: { root: createFakeRoot() } } });
+	await h.handle({ id: 82, type: "open", payload: { blob: file() } });
+	await Promise.all([read, scratch]);
+	function last(id) { return h.messages.filter(function (m) { return m.msg.id === id && m.msg.type !== "progress"; }).pop().msg; }
+	assert.equal(last(80).code, "ABORTED");
+	assert.equal(last(81).code, "ABORTED");
+	assert.equal(last(82).type, "result");
+	var again = h.handle({ id: 83, type: "readRegion", payload: { x: 0, y: 0, width: 64, height: 48 } });
+	await h.handle({ id: 84, type: "close", payload: {} });
+	await again;
+	assert.equal(last(83).code, "ABORTED");
+	assert.equal(last(84).type, "result");
+});
+
 test("close answers and later reads report no open file", async function () {
 	var h = harness();
 	await h.send("open", { blob: file() });

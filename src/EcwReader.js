@@ -109,6 +109,7 @@ EcwReader.prototype.readRegion = async function (opts) {
 EcwReader.prototype._plan = function (opts) {
 	var o = opts || {};
 	var h = this._header;
+	if (this._closed) throw invalid("reader is closed");
 	if (!Number.isInteger(o.x) || !Number.isInteger(o.y) || o.x < 0 || o.y < 0 || !isCount(o.width) || !isCount(o.height)) {
 		throw invalid("readRegion needs integer x, y >= 0 and width, height > 0");
 	}

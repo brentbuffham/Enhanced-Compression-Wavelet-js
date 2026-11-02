@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decodeMode6, decodeMode2, decodeStream } from "../../src/codec/streams.js";
 import { encodeMode2 } from "../helpers/encodeMode2.js";
+import { EcwError } from "../../src/errors.js";
 
 function words(list) {
 	var out = new Uint8Array(list.length * 2);
@@ -87,4 +88,9 @@ test("mode 2: deep trees (300 distinct symbols) decode", function () {
 	var out = decodeMode2(encodeMode2(seq), 300);
 	assert.equal(out[0], 1);
 	assert.equal(out[299], 300);
+});
+
+test("decodeStream rejects a mode it does not know", function () {
+	assert.throws(function () { decodeStream({ mode: 9, bytes: new Uint8Array(4) }, 1); },
+		function (err) { return err instanceof EcwError && err.code === "BAD_BLOCK" && /mode 9/.test(err.message); });
 });

@@ -170,3 +170,10 @@ test("multiband files show their first three bands", async function () {
 	assert.equal(ecw.info.colorSpace, "multiband");
 	assert.deepEqual(pixel(await ecw.readRegion({ x: 0, y: 0, width: 4, height: 4 }), 0, 0), [10, 20, 30, 255]);
 });
+
+test("reads after close are rejected", async function () {
+	var ecw = await openEcw(file());
+	await ecw.close();
+	await assert.rejects(ecw.readRegion({ x: 0, y: 0, width: 4, height: 4 }), function (err) { return err.code === "INVALID_ARGUMENT" && /closed/.test(err.message); });
+	await assert.rejects(ecw.readRegionToScratch({ x: 0, y: 0, width: 4, height: 4 }), function (err) { return err.code === "INVALID_ARGUMENT" && /closed/.test(err.message); });
+});

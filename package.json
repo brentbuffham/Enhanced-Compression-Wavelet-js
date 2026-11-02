@@ -13,7 +13,9 @@
 		"LICENSE",
 		"CHANGELOG.md"
 	],
-	"sideEffects": false,
+	"sideEffects": [
+		"./src/workers/ecwDecodeWorker.js"
+	],
 	"engines": {
 		"node": ">=22"
 	},

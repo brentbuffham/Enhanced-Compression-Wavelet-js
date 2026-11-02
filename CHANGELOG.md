@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Reads on a closed reader now fail with `INVALID_ARGUMENT` instead of running without the cache.
+- `ecw-js/worker`: `open` takes `cache` (the same as `openEcw`). `open` and `close` abort the reads still running and wait for them before closing the file. A job `id` that is still running is rejected.
+- `decodeStream` rejects an unknown stream mode with `BAD_BLOCK` instead of treating it as mode 2.
+- `package.json` lists the worker entry under `sideEffects`.
+- Docs: the format spec says the block-index length is big-endian; the README error table no longer lists `readRegionToScratch` as not implemented.
+- Demo: opening a second file closes the first one's reader.
+- The Pages site deploys only after the tests pass.
+
 ## 0.2.0 (2026-10-19)
 
 - `transparentAbove: N` clears pixels whose R, G and B are all ≥ N (white collars, scanned-map margins).

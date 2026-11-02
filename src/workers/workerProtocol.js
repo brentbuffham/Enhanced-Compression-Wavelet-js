@@ -3,14 +3,17 @@
 // Message protocol behind the ecw-js/worker entry, kept free of
 // Worker globals so it can be driven directly (tests, custom hosts).
 // In:  { id, type, payload }
-//   open                { blob }            -> reader info
+//   open                { blob, cache? }    -> reader info (cache as in openEcw)
 //   readRegion          readRegion options  -> { data, width, height, level, bounds }
 //   readRegionToScratch readRegion options  -> { scratchId, width, height, level, bounds, byteLength }
 //   abort               { id }              -> cancels that job (it rejects ABORTED)
 //   close                                    -> closes the reader, removing its scratch files
 // Out: { id, type: "progress", fraction, label } while a job runs, then
 //      { id, type: "result", result } or { id, type: "error", code, message }.
-// Pixel buffers are transferred, not copied. One open file per handler.
+// Pixel buffers are transferred, not copied. One open file per handler:
+// open and close abort the reads still running on the current file and
+// wait for them to settle before closing it. A job id that is still
+// running can't be reused.
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
@@ -23,6 +26,7 @@ import { openEcw } from "../EcwReader.js";
  */
 export function createWorkerHandler(post) {
 	var reader = null;
+	// running reads: id -> { controller, done }
 	var jobs = new Map();
 
 	function needReader() {
@@ -38,11 +42,24 @@ export function createWorkerHandler(post) {
 		});
 	}
 
+	// Abort every running read and wait until each has posted its answer
+	async function drainJobs() {
+		var running = Array.from(jobs.values());
+		running.forEach(function (job) { job.controller.abort(); });
+		await Promise.all(running.map(function (job) { return job.done; }));
+	}
+
+	async function closeReader() {
+		await drainJobs();
+		if (reader) await reader.close();
+		reader = null;
+	}
+
 	var handlers = {
 		open: async function (id, payload) {
-			if (reader) await reader.close();
-			reader = null;
-			reader = await openEcw(payload && payload.blob);
+			await closeReader();
+			var options = payload && payload.cache !== undefined ? { cache: payload.cache } : undefined;
+			reader = await openEcw(payload && payload.blob, options);
 			return { result: reader.info };
 		},
 		readRegion: async function (id, payload, controller) {
@@ -55,15 +72,15 @@ export function createWorkerHandler(post) {
 		},
 		abort: async function (id, payload) {
 			var job = jobs.get(payload && payload.id);
-			if (job) job.abort();
+			if (job) job.controller.abort();
 			return { result: { aborted: !!job } };
 		},
 		close: async function () {
-			if (reader) await reader.close();
-			reader = null;
+			await closeReader();
 			return { result: { closed: true } };
 		}
 	};
+	var READS = { readRegion: true, readRegionToScratch: true };
 
 	return async function (msg) {
 		var id = msg && msg.id;
@@ -72,16 +89,24 @@ export function createWorkerHandler(post) {
 			post({ id: id, type: "error", code: ERROR_CODES.INVALID_ARGUMENT, message: "unknown message type " + (msg && msg.type) });
 			return;
 		}
-		// Registered before the first await so an "abort" right after can find it
+		if (jobs.has(id)) {
+			post({ id: id, type: "error", code: ERROR_CODES.INVALID_ARGUMENT, message: "job id " + id + " is already running" });
+			return;
+		}
+		// Reads are registered before the first await so an "abort" right after can find them
 		var controller = new AbortController();
-		jobs.set(id, controller);
+		var settle;
+		if (READS[msg.type]) jobs.set(id, { controller: controller, done: new Promise(function (resolve) { settle = resolve; }) });
 		try {
 			var out = await handler(id, msg.payload, controller);
 			post({ id: id, type: "result", result: out.result }, out.transfer || []);
 		} catch (err) {
 			post({ id: id, type: "error", code: (err && err.code) || "ERROR", message: err && err.message ? err.message : String(err) });
 		} finally {
-			jobs.delete(id);
+			if (settle) {
+				jobs.delete(id);
+				settle();
+			}
 		}
 	};
 }
