@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1 (unreleased)
+
+Faster tile cache. Output is unchanged; the GDAL parity tests run with the cache on.
+
+- Pans rebuild only the newly exposed tiles. Before, the cache rebuilt the bounding box of every missing tile, and after a diagonal pan that box covered nearly the whole view, so a pan cost more than a read with no cache. A pan now takes about half the time of an uncached read.
+- New tiles are written to the cache in one pass, as the Int16 eighths it stores, instead of being cut out, copied and encoded separately.
+- Tiles are 32 px by default (was 64): less padding to rebuild per window, so first reads are faster.
+- A requested level too big for a quarter of the cache (a print-sized read) isn't cached. It would push out the coarser tiles that pans reuse. Full-resolution reads with the cache on now take about as long as with it off (0.3.0 was about 25% slower).
+- OPFS tiles saved by 0.3.0 used 64-px tiles and aren't reused; they age out under `maxBytes` as usual.
+
 ## 0.3.0 (2026-11-02)
 
 - **Several cores.** Large reads are split into bands of rows and decoded on a pool of workers. On a 4096 × 4096 full-resolution read in Chrome, 4 workers took about 0.9 s against 2.0 s on one thread. Output is unchanged, and the GDAL parity tests run with one thread and with two workers.

@@ -189,3 +189,30 @@ test("packs written in the same millisecond still evict oldest first", async fun
 		Date.now = realNow;
 	}
 });
+
+test("putEighths stores ready-made Int16 eighths: the same tile as put, without re-encoding", async function () {
+	var root = createFakeRoot();
+	var c = new BlockCache({ tileSize: 4, opfs: { root: root }, fingerprint: "fp-eighths" });
+	var t = tile(4, 4, 7);
+	var planes = t.bands.map(function (band) { return Int16Array.from(band, function (v) { return v * 8; }); });
+	await c.putEighths(1, 0, 0, 4, 4, planes);
+	await c.put(1, 1, 0, t);
+	same(await c.get(1, 0, 0), t);
+	assert.equal((await c.get(1, 0, 0)).bands[0], planes[0], "kept as given");
+	assert.equal(c.stats().memoryBytes, TILE_BYTES * 2);
+	await c.flush();
+	var fresh = new BlockCache({ tileSize: 4, opfs: { root: root }, fingerprint: "fp-eighths" });
+	same(await fresh.get(1, 0, 0), t);
+});
+
+test("tiles are 32 px by default", function () {
+	assert.equal(new BlockCache().tileSize, 32);
+});
+
+test("keepsLevel: a level window is worth caching while its tiles fit a quarter of memoryBytes", function () {
+	var c = new BlockCache({ memoryBytes: 4 * 1000 * 6 });
+	// Int16 eighths: 2 bytes a value, so 1000 pixels of 3 bands take 6000 bytes
+	assert.equal(c.keepsLevel(1000, 3), true);
+	assert.equal(c.keepsLevel(1001, 3), false);
+	assert.equal(new BlockCache({ memoryBytes: 0 }).keepsLevel(1, 1), false);
+});

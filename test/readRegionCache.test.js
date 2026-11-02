@@ -79,3 +79,16 @@ test("resample average gives the same pixels with or without the cache", async f
 	await ecw.readRegion(opts);
 	assert.deepEqual(Array.from((await ecw.readRegion(opts)).data), Array.from(plain.data));
 });
+
+test("levels with values too large for Int16 eighths still read the same cached and uncached", async function () {
+	var big = buildCodedFile({ width: 64, height: 48, levelCount: 3, coeff: function (r, b, sb, x, y) {
+		return sb === "LL" ? [5000 + 40 * x - 30 * y, 4, -3][b] : ((x * 3 + y * 5 + r + b) % 7) - 3;
+	} }).bytes;
+	var cached = await openEcw(new Blob([big]));
+	var a = await cached.readRegion(REGION);
+	var b = await cached.readRegion(REGION);
+	var plain = await (await openEcw(new Blob([big]), { cache: false })).readRegion(REGION);
+	assert.deepEqual(Array.from(a.data), Array.from(plain.data));
+	assert.deepEqual(Array.from(b.data), Array.from(plain.data));
+	assert.ok(cached.cacheStats().hits > 0);
+});

@@ -24,7 +24,8 @@ export var CACHE_DIR = "ecw-cache";
 // Bump whenever decoded pixel values change, so stale tiles are never reused
 export var CACHE_VERSION = 1;
 
-var DEFAULT_TILE_SIZE = 64;
+// 32 px: less padding per window than 64 (cheaper first reads), without 16's per-tile cost
+var DEFAULT_TILE_SIZE = 32;
 export var DEFAULT_MEMORY_BYTES = 256 * 1024 * 1024;
 var DEFAULT_OPFS_BYTES = 512 * 1024 * 1024;
 var DEFAULT_FLUSH_BYTES = 8 * 1024 * 1024;
@@ -213,6 +214,20 @@ export function BlockCache(options) {
 	this._stats = { hits: 0, misses: 0, opfsHits: 0 };
 }
 
+/**
+ * Whether a requested level window of this many pixels is worth keeping: its
+ * tiles (Int16, 2 bytes a value) must fit a quarter of the cache. A bigger one
+ * (a print-sized read) would push out the coarser tiles that pans reuse, for a
+ * window that is rarely read again exactly.
+ * @param {number} pixels
+ * @param {number} bands
+ * @returns {boolean}
+ */
+BlockCache.prototype.keepsLevel = function (pixels, bands) {
+	var budget = Math.max(this._memoryLimit, this._opfs ? this._opfs.maxBytes : 0);
+	return pixels * bands * 2 <= budget / 4;
+};
+
 BlockCache.prototype._key = function (j, tx, ty) {
 	return "L" + j + "_" + tx + "_" + ty + "_t" + this.tileSize;
 };
@@ -245,9 +260,19 @@ BlockCache.prototype.get = async function (j, tx, ty) {
 };
 
 /** Store a tile; OPFS writes are buffered until flushBytes are pending or flush(). */
-BlockCache.prototype.put = async function (j, tx, ty, tile) {
-	var key = this._key(j, tx, ty);
-	var enc = encodeTile(tile);
+BlockCache.prototype.put = function (j, tx, ty, tile) {
+	return this._store(this._key(j, tx, ty), encodeTile(tile));
+};
+
+/**
+ * Store a tile given as Int16 eighths (value * 8), one plane per band, as
+ * the decoder makes them: no second pass to encode. The planes are kept as given.
+ */
+BlockCache.prototype.putEighths = function (j, tx, ty, width, height, planes) {
+	return this._store(this._key(j, tx, ty), { width: width, height: height, kind: KIND_EIGHTHS, planes: planes });
+};
+
+BlockCache.prototype._store = async function (key, enc) {
 	this._remember(key, enc);
 	if (!this._opfs) return;
 	this._pending.push({ key: key, enc: enc });

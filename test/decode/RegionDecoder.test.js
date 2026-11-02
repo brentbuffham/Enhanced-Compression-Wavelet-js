@@ -283,6 +283,26 @@ test("a pan synthesises only the newly exposed tiles", async function () {
 	assert.ok(panned.fetches() < fresh.fetches(), panned.fetches() + " < " + fresh.fetches());
 });
 
+test("a diagonal pan rebuilds only the new strips, not their bounding box", async function () {
+	var bytes = buildCodedFile({ width: 256, height: 256, levelCount: 3, coeff: hash }).bytes;
+	var cache = mapCache(8);
+	await decodeWindow(contextFor(bytes, { tileCache: cache }).ctx, 3, 0, 0, 128, 128);
+	var panned = contextFor(bytes, { tileCache: cache });
+	var fresh = contextFor(bytes);
+	// an L of new tiles: the bounding box of an L is nearly the whole window
+	var a = await decodeWindow(panned.ctx, 3, 64, 64, 192, 192);
+	var b = await decodeWindow(fresh.ctx, 3, 64, 64, 192, 192);
+	for (var band = 0; band < 3; band++) assert.deepEqual(Array.from(a.bands[band]), eighths(b.bands[band]));
+	// the floor: the two new strips decoded on their own, no cache
+	var strips = contextFor(bytes);
+	await decodeWindow(strips.ctx, 3, 128, 64, 192, 128);
+	await decodeWindow(strips.ctx, 3, 64, 128, 192, 192);
+	var msg = panned.fetches() + " blocks for the pan, " + strips.fetches() + " for the strips alone, " + fresh.fetches() + " fresh";
+	assert.ok(panned.fetches() < fresh.fetches(), msg);
+	// within tile snapping of the floor (large here: 4-px blocks under 8-px tiles)
+	assert.ok(panned.fetches() <= 1.15 * strips.fetches(), msg);
+});
+
 test("tiles the cache drops are recomputed, output unchanged", async function () {
 	var bytes = buildCodedFile({ width: 61, height: 45, levelCount: 4, coeff: hash }).bytes;
 	var inner = mapCache(8), calls = 0;
@@ -318,4 +338,22 @@ test("fetchBlocks reads each block row's missing run once and decodes the same p
 	assert.deepEqual(done, done.map(function (_, i) { return i + 1; }), "onBlock still counts blocks one by one");
 	var seen = new Set();
 	runs.forEach(function (r) { for (var n = r[0]; n <= r[1]; n++) { assert.ok(!seen.has(n), "block " + n + " fetched twice"); seen.add(n); } });
+});
+
+test("the requested level is cached only when the cache wants it; output is the same either way", async function () {
+	var bytes = buildCodedFile({ width: 61, height: 45, levelCount: 4, coeff: hash }).bytes;
+	var keeps = mapCache(8);
+	keeps.keepsLevel = function () { return true; };
+	var skips = mapCache(8);
+	skips.keepsLevel = function () { return false; };
+	var plain = await decodeWindow(contextFor(bytes).ctx, 4, 3, 2, 58, 41);
+	var a = await decodeWindow(contextFor(bytes, { tileCache: keeps }).ctx, 4, 3, 2, 58, 41);
+	var b = await decodeWindow(contextFor(bytes, { tileCache: skips }).ctx, 4, 3, 2, 58, 41);
+	for (var band = 0; band < 3; band++) {
+		assert.deepEqual(Array.from(a.bands[band]), eighths(plain.bands[band]));
+		assert.deepEqual(eighths(b.bands[band]), eighths(plain.bands[band]));
+	}
+	function levels(c) { return Array.from(new Set(c.keys().map(function (k) { return Number(k.split("/")[0]); }))).sort(); }
+	assert.deepEqual(levels(keeps), [1, 2, 3, 4]);
+	assert.deepEqual(levels(skips), [1, 2, 3], "the requested level 4 isn't stored");
 });

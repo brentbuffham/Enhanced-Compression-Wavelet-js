@@ -30,7 +30,9 @@ import { synthesizeWindow, requiredCoefficientWindow } from "../codec/wavelet.js
  *   fetchBlocks?:function(number, number): Promise<Uint8Array[]>, signal?:AbortSignal,
  *   onBlock?:function(number), tileCache?:object}} o
  *   tileCache (BlockCache): { tileSize, get(j, tx, ty) -> Promise<tile|null>,
- *   put(j, tx, ty, tile) -> Promise } holding reconstructed level tiles
+ *   put(j, tx, ty, tile) -> Promise, putEighths?(j, tx, ty, width, height, Int16 planes) -> Promise,
+ *   keepsLevel?(pixels, bands) -> boolean (false: the requested level isn't cached) }
+ *   holding reconstructed level tiles
  *   { width, height, bands } at full precision.
  *   Give fetchBlock(n) or fetchBlocks(n0, n1). fetchBlocks returns blocks
  *   n0..n1 (inclusive) in one go, and is then used for every block.
@@ -220,11 +222,15 @@ async function decodeLevel(ctx, j, x0, y0, x1, y1, requested) {
 			return p.LL;
 		}) };
 	}
+	// levels below the requested one always go through the cache; the requested
+	// one only when the cache wants a window that size (keepsLevel)
+	var cache = ctx.tileCache;
+	var useCache = cache && (!requested || !cache.keepsLevel || cache.keepsLevel((x1 - x0) * (y1 - y0), h.bands));
 	// tiles are already floored to eighths
-	var bands = ctx.tileCache
+	var bands = useCache
 		? await assembleTiles(ctx, j, size, x0, y0, x1, y1)
 		: await synthesizeLevel(ctx, j, x0, y0, x1, y1);
-	if (!requested && !ctx.tileCache) storeIntermediate(bands);
+	if (!requested && !useCache) storeIntermediate(bands);
 	return { width: x1 - x0, height: y1 - y0, bands: bands };
 }
 
@@ -250,57 +256,109 @@ async function synthesizeLevel(ctx, j, x0, y0, x1, y1) {
 	return bands;
 }
 
-// The same window built from cached tiles of image level j, floored to eighths;
-// the missing tiles' bounding box is synthesised in one call, floored and stored
-// (one large synthesis is far cheaper than many tile-sized ones). A pixel's value never
-// depends on the window it was computed in, so tiles assemble to exactly what
-// synthesizeLevel returns, floored. Eighths are all a level feeding the next one
-// uses, and all readRegion uses of the requested level (colour floors to integers).
+// The same window built from cached tiles of image level j, floored to eighths.
+// The missing tiles are grouped into rectangles (runs along a row, merged down
+// while the rows below have the same run); each is synthesised in one call,
+// floored and stored. One large synthesis is far cheaper than many tile-sized
+// ones, but the bounding box of every missing tile is not: after a diagonal pan
+// the new tiles form an L, whose bounding box is nearly the whole window. A
+// pixel's value never depends on the window it was computed in, so tiles
+// assemble to exactly what synthesizeLevel returns, floored. Eighths are all a
+// level feeding the next one uses, and all readRegion uses of the requested
+// level (colour floors to integers).
 async function assembleTiles(ctx, j, size, x0, y0, x1, y1) {
 	var cache = ctx.tileCache, t = cache.tileSize, width = x1 - x0;
 	var tx0 = Math.floor(x0 / t), tx1 = Math.floor((x1 - 1) / t), ty0 = Math.floor(y0 / t), ty1 = Math.floor((y1 - 1) / t);
-	// Step 1) Look every tile up; note the bounding box of the missing ones
-	var tiles = [], mx0 = Infinity, mx1 = -1, my0 = Infinity, my1 = -1;
+	var cols = tx1 - tx0 + 1, rows = ty1 - ty0 + 1;
+	// Step 1) Look every tile up
+	var tiles = [];
 	for (var ty = ty0; ty <= ty1; ty++) {
-		for (var tx = tx0; tx <= tx1; tx++) {
-			var tile = await cache.get(j, tx, ty);
-			tiles.push(tile);
-			if (!tile) {
-				mx0 = Math.min(mx0, tx); mx1 = Math.max(mx1, tx);
-				my0 = Math.min(my0, ty); my1 = Math.max(my1, ty);
-			}
-		}
+		for (var tx = tx0; tx <= tx1; tx++) tiles.push(await cache.get(j, tx, ty));
 	}
-	// Step 2) Synthesise that box in one call (snapped to tiles), floor it, store its tiles
-	var box = null;
-	if (mx1 >= 0) {
-		var bx0 = mx0 * t, by0 = my0 * t, bx1 = Math.min(size.width, (mx1 + 1) * t), by1 = Math.min(size.height, (my1 + 1) * t);
-		box = { x0: bx0, y0: by0, width: bx1 - bx0, height: by1 - by0, scale: 1, bands: await synthesizeLevel(ctx, j, bx0, by0, bx1, by1) };
-		storeIntermediate(box.bands);
-		for (ty = my0; ty <= my1; ty++) {
-			for (tx = mx0; tx <= mx1; tx++) {
-				var px0 = tx * t, py0 = ty * t, pw = Math.min(size.width, px0 + t) - px0, ph = Math.min(size.height, py0 + t) - py0;
-				var cut = box.bands.map(function (band) {
-					var out = new Float32Array(pw * ph);
-					for (var y = 0; y < ph; y++) out.set(band.subarray((py0 - by0 + y) * box.width + px0 - bx0, (py0 - by0 + y) * box.width + px0 - bx0 + pw), y * pw);
-					return out;
-				});
-				await cache.put(j, tx, ty, { width: pw, height: ph, bands: cut });
-			}
-		}
-	}
-	// Step 3) Copy the window out of the box and the cached tiles
 	var bands = [];
 	for (var bnd = 0; bnd < ctx.header.bands; bnd++) bands.push(new Float32Array(width * (y1 - y0)));
-	if (box) copyInto(bands, width, x0, y0, x1, y1, box, box.x0, box.y0);
+	// Step 2) Synthesise each rectangle of missing tiles (snapped to tiles), floor it,
+	// store its tiles and copy its part of the window
+	var rects = missingRects(tiles, cols, rows);
+	for (var r = 0; r < rects.length; r++) {
+		var rc = rects[r];
+		var bx0 = (tx0 + rc.c0) * t, by0 = (ty0 + rc.r0) * t;
+		var bx1 = Math.min(size.width, (tx0 + rc.c1 + 1) * t), by1 = Math.min(size.height, (ty0 + rc.r1 + 1) * t);
+		var box = { width: bx1 - bx0, height: by1 - by0, scale: 1, bands: await synthesizeLevel(ctx, j, bx0, by0, bx1, by1) };
+		storeIntermediate(box.bands);
+		for (ty = ty0 + rc.r0; ty <= ty0 + rc.r1; ty++) {
+			for (tx = tx0 + rc.c0; tx <= tx0 + rc.c1; tx++) {
+				var px0 = tx * t, py0 = ty * t, pw = Math.min(size.width, px0 + t) - px0, ph = Math.min(size.height, py0 + t) - py0;
+				// the usual case: eighths that fit Int16, written straight from the box
+				var planes = cache.putEighths ? eighthsTile(box, px0 - bx0, py0 - by0, pw, ph) : null;
+				if (planes) await cache.putEighths(j, tx, ty, pw, ph, planes);
+				else await cache.put(j, tx, ty, { width: pw, height: ph, bands: floatTile(box, px0 - bx0, py0 - by0, pw, ph) });
+			}
+		}
+		copyInto(bands, width, x0, y0, x1, y1, box, bx0, by0);
+	}
+	// Step 3) Copy the cached tiles
 	var n = 0;
 	for (ty = ty0; ty <= ty1; ty++) {
 		for (tx = tx0; tx <= tx1; tx++, n++) {
-			if (box && tx >= mx0 && tx <= mx1 && ty >= my0 && ty <= my1) continue;
-			copyInto(bands, width, x0, y0, x1, y1, tiles[n], tx * t, ty * t);
+			if (tiles[n]) copyInto(bands, width, x0, y0, x1, y1, tiles[n], tx * t, ty * t);
 		}
 	}
 	return bands;
+}
+
+// Missing tiles (null in tiles, row-major, cols x rows) as rectangles of tile
+// indices {c0, c1, r0, r1}: each row's runs of missing tiles, a run merged into
+// the rectangle above when that has exactly the same columns. Rectangles never overlap.
+function missingRects(tiles, cols, rows) {
+	var done = [], open = [];
+	for (var r = 0; r < rows; r++) {
+		var next = [];
+		for (var c = 0; c < cols; c++) {
+			if (tiles[r * cols + c]) continue;
+			var c0 = c;
+			while (c + 1 < cols && !tiles[r * cols + c + 1]) c++;
+			var above = -1;
+			for (var k = 0; k < open.length; k++) if (open[k].c0 === c0 && open[k].c1 === c) above = k;
+			if (above >= 0) {
+				var rect = open.splice(above, 1)[0];
+				rect.r1 = r;
+				next.push(rect);
+			} else next.push({ c0: c0, c1: c, r0: r, r1: r });
+		}
+		done = done.concat(open);
+		open = next;
+	}
+	return done.concat(open);
+}
+
+// One tile of a floored box as Int16 eighths (value * 8), or null when a value
+// doesn't fit Int16 (the cache then keeps that tile as Float32)
+function eighthsTile(box, ox, oy, pw, ph) {
+	var planes = [];
+	for (var b = 0; b < box.bands.length; b++) {
+		var band = box.bands[b], out = new Int16Array(pw * ph), k = 0;
+		for (var y = 0; y < ph; y++) {
+			for (var i = (oy + y) * box.width + ox, end = i + pw; i < end; i++) {
+				var v = band[i] * 8;
+				if (v > 32767 || v < -32768) return null;
+				out[k++] = v;
+			}
+		}
+		planes.push(out);
+	}
+	return planes;
+}
+
+// One tile of a box as Float32 copies
+function floatTile(box, ox, oy, pw, ph) {
+	return box.bands.map(function (band) {
+		var out = new Float32Array(pw * ph), k = 0;
+		for (var y = 0; y < ph; y++) {
+			for (var i = (oy + y) * box.width + ox, end = i + pw; i < end; i++) out[k++] = band[i];
+		}
+		return out;
+	});
 }
 
 // Copy the overlap of a source {width, height, bands, scale} placed at (sx, sy) into
