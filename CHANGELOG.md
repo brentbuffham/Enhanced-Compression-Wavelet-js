@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.1 (unreleased)
+## 0.3.1 (2026-11-03)
 
 Faster tile cache. Output is unchanged; the GDAL parity tests run with the cache on.
 
