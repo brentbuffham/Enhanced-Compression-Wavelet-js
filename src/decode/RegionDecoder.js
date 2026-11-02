@@ -26,14 +26,14 @@ import { synthesizeWindow, requiredCoefficientWindow } from "../codec/wavelet.js
 
 /**
  * @param {{header:object, levels:Array, index:object, grid:Array,
- *   fetchBlock:function(number): Promise<Uint8Array>,
+ *   fetchBlock?:function(number): Promise<Uint8Array>,
  *   fetchBlocks?:function(number, number): Promise<Uint8Array[]>, signal?:AbortSignal,
  *   onBlock?:function(number), tileCache?:object}} o
  *   tileCache (BlockCache): { tileSize, get(j, tx, ty) -> Promise<tile|null>,
  *   put(j, tx, ty, tile) -> Promise } holding reconstructed level tiles
  *   { width, height, bands } at full precision.
- *   fetchBlocks(n0, n1), when given, returns blocks n0..n1 (inclusive) in one
- *   go and is used instead of fetchBlock for runs of neighbouring blocks.
+ *   Give fetchBlock(n) or fetchBlocks(n0, n1). fetchBlocks returns blocks
+ *   n0..n1 (inclusive) in one go, and is then used for every block.
  * @returns {object} decode context
  */
 export function createDecodeContext(o) {
@@ -74,7 +74,7 @@ async function getBlock(ctx, record, row, col) {
 	var cached = ctx.blocks.get(n);
 	if (cached) return cached;
 	checkAbort(ctx);
-	return addBlock(ctx, record, row, col, await ctx.fetchBlock(n));
+	return addBlock(ctx, record, row, col, ctx.fetchBlocks ? (await ctx.fetchBlocks(n, n))[0] : await ctx.fetchBlock(n));
 }
 
 // Load the blocks of one block row, columns c0..c1, that aren't loaded yet:

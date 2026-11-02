@@ -8,13 +8,16 @@
 </head>
 <body>
 	<header class="topbar">
-		<div class="brand"><strong>ecw-js</strong> <span class="muted">demo</span></div>
+		<div class="brand"><strong>ecw-js</strong> <span id="version" class="muted"></span> <span class="muted">demo</span></div>
 		<div class="file-name" id="fileName">Drop an .ecw file anywhere</div>
 		<label class="toggle" title="Copy opened files into browser storage (OPFS) so they reopen after a reload">
 			<input type="checkbox" id="keepToggle"> Keep in browser
 		</label>
 		<label class="toggle hidden" id="vividLabel" title="Show raw colour values on this wide-gamut screen, like QGIS. Off: colour-managed sRGB.">
 			<input type="checkbox" id="vividToggle"> Vivid colour
+		</label>
+		<label class="toggle" title="openEcw(file, { threads }): workers that decode big reads in parallel. Changing it reopens the file.">
+			Threads <select id="threadsSelect"><option value="0" selected>auto</option><option value="1">1</option><option value="2">2</option><option value="4">4</option><option value="8">8</option></select>
 		</label>
 		<label class="button">
 			Open file

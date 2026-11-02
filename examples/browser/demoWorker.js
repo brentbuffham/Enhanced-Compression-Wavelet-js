@@ -25,7 +25,9 @@ var handlers = {
 		// release the previous file's cache and scratch files
 		if (state) await state.reader.close();
 		state = null;
-		state = { file: payload.file, opened: opened, reader: await openEcw(payload.file, payload.opfsCache ? { cache: { opfs: true } } : undefined) };
+		var options = { threads: payload.threads };
+		if (payload.opfsCache) options.cache = { opfs: true };
+		state = { file: payload.file, opened: opened, reader: await openEcw(payload.file, options) };
 		return opened;
 	},
 	levelBlocks: function (payload, onProgress) {

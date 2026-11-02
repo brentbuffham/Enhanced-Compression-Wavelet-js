@@ -13,7 +13,7 @@ import { BlobSource } from "./io/BlobSource.js";
 import { MemorySource } from "./io/MemorySource.js";
 import { parseHeader } from "./format/EcwHeader.js";
 import { parseLevels } from "./format/EcwLevels.js";
-import { parseBlockIndex, blockGrid, blockEntryWindow, blockByteRange, blockRunEntryWindow, blockRunByteRanges } from "./format/EcwBlockIndex.js";
+import { parseBlockIndex, blockGrid, blockRunEntryWindow, blockRunByteRanges } from "./format/EcwBlockIndex.js";
 import { pixelWindowToBounds } from "./format/georef.js";
 import { createDecodeContext, decodeWindow, imageLevelSize, countWindowBlocks } from "./decode/RegionDecoder.js";
 import { sampleWindow } from "./decode/sampleWindow.js";
@@ -22,12 +22,19 @@ import { applyColorKey, colorKeysFromOptions } from "./post/applyColorKey.js";
 import { clipToPolygon } from "./post/clipToPolygon.js";
 import { applyStretch, stretchFromPixels } from "./post/stretch.js";
 import { openScratchSyncWriter, openScratchReader, removeScratchFile } from "./io/ScratchBinaryFile.js";
-import { BlockCache, fileFingerprint } from "./cache/BlockCache.js";
+import { BlockCache, fileFingerprint, DEFAULT_MEMORY_BYTES } from "./cache/BlockCache.js";
+import { createDecodePool, defaultThreads } from "./decode/pool.js";
 
 // Fixed header (0x59) plus up to 255 level records (21 bytes each) fits in 8 KB
 var HEADER_READ_BYTES = 8192;
 var DEFAULT_MAX_OUTPUT_BYTES = 512 * 1024 * 1024;
 var DEFAULT_STRIP_BYTES = 64 * 1024 * 1024;
+// threads: automatic mode starts workers only for outputs this big (starting
+// them costs about as much as a small read), uses at most this many per reader,
+// and lets an idle pool go after this long
+var AUTO_MIN_PIXELS = 1024 * 1024;
+var AUTO_MAX_THREADS = 4;
+var POOL_IDLE_MS = 30000;
 
 /**
  * Reader for one ECW file. Create with openEcw().
@@ -47,6 +54,17 @@ export function EcwReader(blobSource, header, levels, headerBytes, cache) {
 	this._closed = false;
 	this._scratchIds = [];
 	this._cache = cache || null;
+	// worker pool (openEcw sets threads and the cache options it copies)
+	this._threads = 1;
+	this._cacheOpts = false;
+	this._pool = null;
+	this._poolStart = null;
+	this._poolFailed = false;
+	this._poolBusy = 0;
+	this._poolTimer = null;
+	this._poolUrl = undefined;
+	this._autoMinPixels = AUTO_MIN_PIXELS;
+	this._poolIdleMs = POOL_IDLE_MS;
 	/** Public description of the image; `levels` runs coarsest first and ends at full resolution. */
 	this.info = {
 		version: header.version,
@@ -100,7 +118,7 @@ EcwReader.prototype.readRegion = async function (opts) {
 		throw new EcwError(ERROR_CODES.OUTPUT_TOO_LARGE, "output of " + plan.outW + "x" + plan.outH + " exceeds " + maxBytes + " bytes; use readRegionToScratch");
 	}
 	var report = plan.o.onProgress || function () {};
-	var data = await this._decodeRows(plan, 0, plan.outH, function (f, label) { report(0.95 * f, label); });
+	var data = await this._rows(plan, 0, plan.outH, function (f, label) { report(0.95 * f, label); });
 	report(1, "done");
 	return { data: data, width: plan.outW, height: plan.outH, level: plan.level, bounds: plan.bounds };
 };
@@ -147,11 +165,6 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	var index = this._index;
 	var ctx = createDecodeContext({
 		header: h, levels: this._levels, index: index, grid: this._grid, signal: o.signal, tileCache: this._cache,
-		fetchBlock: async function (n) {
-			var w = blockEntryWindow(index, n);
-			var r = blockByteRange(index, n, await blobSource.read(w.start, w.end), blobSource.size);
-			return blobSource.read(r.start, r.end);
-		},
 		// a row of neighbouring blocks is back to back in the file: two reads for the lot
 		fetchBlocks: async function (n0, n1) {
 			var w = blockRunEntryWindow(index, n0, n1);
@@ -236,7 +249,7 @@ EcwReader.prototype.readRegionToScratch = async function (opts) {
 			var oy0 = s * rowsPerStrip;
 			var oy1 = Math.min(plan.outH, oy0 + rowsPerStrip);
 			var label = "strip " + (s + 1) + " of " + strips + ": ";
-			var data = await this._decodeRows(plan, oy0, oy1, function (f, text) { report((s + f) / strips * 0.99, label + text); });
+			var data = await this._rows(plan, oy0, oy1, function (f, text) { report((s + f) / strips * 0.99, label + text); });
 			writer.write(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
 		}
 		writer.close();
@@ -266,10 +279,152 @@ EcwReader.prototype.cacheStats = function () {
 	return this._cache ? this._cache.stats() : null;
 };
 
+/**
+ * Output rows [oy0, oy1) of a planned read: on the worker pool when one is
+ * in use, each worker decoding one band of rows, else on this thread.
+ * Either way the bytes are the same.
+ */
+EcwReader.prototype._rows = async function (plan, oy0, oy1, report) {
+	var pool = await this._poolFor(plan.outW * (oy1 - oy0));
+	if (!pool) return this._decodeRows(plan, oy0, oy1, report);
+	this._poolBusy++;
+	clearTimeout(this._poolTimer);
+	try {
+		return await decodeBands(pool, plan, oy0, oy1, report);
+	} finally {
+		this._poolBusy--;
+		if (!this._poolBusy) this._idlePool(pool);
+	}
+};
+
+// The pool for a read of this many output pixels, or null for this thread
+EcwReader.prototype._poolFor = async function (pixels) {
+	if (this._threads === 1 || this._poolFailed) return null;
+	if (this._threads === 0) {
+		if (pixels < this._autoMinPixels) return null;
+		// the OPFS tile cache lives on this thread, so automatic mode keeps reads here
+		if (this._cacheOpts && this._cacheOpts.opfs) return null;
+	}
+	if (!this._poolStart) this._startPool();
+	// automatic mode never waits for workers: until the pool is up, reads run here
+	if (this._threads === 0 && !this._pool) return null;
+	var start = this._poolStart;
+	var pool = await start;
+	if (!pool || pool.broken) {
+		// workers that can't start, or one that died: this thread from now on
+		if (pool) pool.close();
+		if (this._poolStart === start) this._poolStart = null;
+		this._poolFailed = true;
+		return null;
+	}
+	this._pool = pool;
+	return pool;
+};
+
+// Start the worker pool; _pool is set once it is up (or _poolFailed if it can't start)
+EcwReader.prototype._startPool = function () {
+	var self = this;
+	var start = (async function () {
+		var n = self._threads || Math.min(AUTO_MAX_THREADS, await defaultThreads());
+		if (n < 2) return null;
+		var c = self._cacheOpts;
+		// each worker keeps its own memory tiles: an equal share of the budget
+		var cache = c === false ? false : { tileSize: c.tileSize, memoryBytes: Math.floor((c.memoryBytes === undefined ? DEFAULT_MEMORY_BYTES : c.memoryBytes) / n) };
+		return createDecodePool(n, self._blobSource._blob, cache, self._poolUrl);
+	})().catch(function () { return null; }).then(function (pool) {
+		if (self._poolStart !== start) {
+			// closed, or replaced while starting
+			if (pool) pool.close();
+			return null;
+		}
+		if (!pool) {
+			self._poolStart = null;
+			self._poolFailed = true;
+			return null;
+		}
+		self._pool = pool;
+		// a pool started ahead of use still goes when idle
+		if (!self._poolBusy) self._idlePool(pool);
+		return pool;
+	});
+	this._poolStart = start;
+};
+
+// Close the pool once nothing has used it for _poolIdleMs; the next big read starts it again
+EcwReader.prototype._idlePool = function (pool) {
+	var self = this;
+	clearTimeout(this._poolTimer);
+	this._poolTimer = setTimeout(function () {
+		if (self._poolBusy || self._pool !== pool) return;
+		self._pool = null;
+		self._poolStart = null;
+		pool.close();
+	}, this._poolIdleMs);
+	// a pending timer never keeps Node running
+	if (this._poolTimer && this._poolTimer.unref) this._poolTimer.unref();
+};
+
+// The read options a worker needs: the pixel options. Not the signal, progress
+// callback or scratch settings (they hold functions and stay on this thread).
+var THIS_THREAD_ONLY = { signal: true, onProgress: true, scratch: true, stripBytes: true, maxOutputBytes: true };
+function postableOptions(o) {
+	var out = {};
+	Object.keys(o).forEach(function (k) { if (!THIS_THREAD_ONLY[k]) out[k] = o[k]; });
+	return out;
+}
+
+// Split rows [oy0, oy1) into one band per worker; band i always goes to worker i
+async function decodeBands(pool, plan, oy0, oy1, report) {
+	var rows = oy1 - oy0;
+	var k = Math.min(pool.size, rows);
+	var opts = postableOptions(plan.o);
+	var out = new Uint8ClampedArray(plan.outW * rows * 4);
+	var share = new Float64Array(k);
+	var label = "decoding in " + k + " workers";
+	var stop = new AbortController();
+	var signal = plan.o.signal;
+	function onAbort() { stop.abort(); }
+	if (signal) {
+		if (signal.aborted) throw new EcwError(ERROR_CODES.ABORTED, "decode aborted");
+		signal.addEventListener("abort", onAbort);
+	}
+	try {
+		var bands = [];
+		for (var i = 0; i < k; i++) {
+			bands.push((function (i, b0, b1) {
+				return pool.rows(i, { opts: opts, oy0: b0, oy1: b1 }, function (f) {
+					share[i] = f * (b1 - b0) / rows;
+					var sum = 0;
+					for (var s = 0; s < k; s++) sum += share[s];
+					report(sum, label);
+				}, stop.signal).then(function (data) {
+					out.set(data, (b0 - oy0) * plan.outW * 4);
+				}, function (err) {
+					// one band failing stops the others
+					stop.abort();
+					throw err;
+				});
+			})(i, oy0 + Math.floor(rows * i / k), oy0 + Math.floor(rows * (i + 1) / k)));
+		}
+		await Promise.all(bands);
+	} finally {
+		if (signal) signal.removeEventListener("abort", onAbort);
+	}
+	return out;
+}
+
 /** Release resources and delete this reader's scratch files. Safe to call more than once. */
 EcwReader.prototype.close = async function () {
 	this._closed = true;
 	this._cache = null;
+	clearTimeout(this._poolTimer);
+	var start = this._poolStart;
+	this._poolStart = null;
+	this._pool = null;
+	if (start) {
+		var pool = await start;
+		if (pool) pool.close();
+	}
 	while (this._scratchIds.length) await this._removeScratch(this._scratchIds[0].id);
 };
 
@@ -277,9 +432,11 @@ EcwReader.prototype.close = async function () {
  * Open an ECW file and read its header, georeferencing and level table.
  * @param {Blob} blob - A File or Blob.
  * @param {{cache?: false|{tileSize?:number, memoryBytes?:number,
- *   opfs?:boolean|{root?:object, dir?:string, maxBytes?:number}}}} [options]
+ *   opfs?:boolean|{root?:object, dir?:string, maxBytes?:number}}, threads?:number}} [options]
  *   cache: reconstructed tiles are kept in memory (256 MB) by default; false turns
  *   caching off; opfs also keeps them in OPFS (512 MB) for later sessions.
+ *   threads: 0 or unset = automatic (up to 4 workers for outputs of 1 megapixel
+ *   or more, unless the OPFS cache is on), 1 = this thread only, n = n workers.
  * @returns {Promise<EcwReader>}
  */
 export async function openEcw(blob, options) {
@@ -287,6 +444,8 @@ export async function openEcw(blob, options) {
 	if (cacheOpts !== undefined && cacheOpts !== false && (typeof cacheOpts !== "object" || cacheOpts === null)) {
 		throw invalid("cache must be false or an options object");
 	}
+	var threads = options ? options.threads : undefined;
+	if (threads !== undefined && (!Number.isInteger(threads) || threads < 0)) throw invalid("threads must be an integer of 0 or more");
 	var blobSource = new BlobSource(blob);
 	var bytes = await blobSource.read(0, Math.min(HEADER_READ_BYTES, blobSource.size));
 	var source = new MemorySource(bytes);
@@ -298,5 +457,8 @@ export async function openEcw(blob, options) {
 		cache = new BlockCache({ tileSize: c.tileSize, memoryBytes: c.memoryBytes, opfs: c.opfs,
 			fingerprint: c.opfs ? await fileFingerprint(blob) : undefined });
 	}
-	return new EcwReader(blobSource, header, levels, bytes, cache);
+	var reader = new EcwReader(blobSource, header, levels, bytes, cache);
+	reader._threads = threads || 0;
+	reader._cacheOpts = cacheOpts === false ? false : (cacheOpts || {});
+	return reader;
 }

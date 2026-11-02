@@ -14,7 +14,7 @@ test("package is a zero-dependency ES module", function () {
 	assert.equal(pkg.name, "ecw-js");
 	assert.equal(pkg.type, "module");
 	assert.equal(pkg.license, "MIT");
-	assert.deepEqual(pkg.sideEffects, ["./src/workers/ecwDecodeWorker.js"]);
+	assert.deepEqual(pkg.sideEffects, ["./src/workers/ecwDecodeWorker.js", "./src/workers/decodePoolWorker.js"]);
 	assert.deepEqual(pkg.engines, { node: ">=22" });
 	assert.equal(pkg.dependencies, undefined);
 	assert.equal(pkg.devDependencies, undefined);

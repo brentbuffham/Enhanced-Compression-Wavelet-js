@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+- **Several cores.** Large reads are split into bands of rows and decoded on a pool of workers. On a 4096 × 4096 full-resolution read in Chrome, 4 workers took about 0.9 s against 2.0 s on one thread. Output is unchanged, and the GDAL parity tests run with one thread and with two workers.
+- `openEcw(file, { threads })`: unset or 0 is automatic (up to 4 workers for reads of 1 megapixel or more, started in the background so no read waits for them), 1 keeps reads on this thread, `n` uses `n` workers.
+- With `cache: { opfs: true }`, automatic mode stays on this thread, so the OPFS tile cache keeps working as before.
+- The pool closes after 30 seconds without use and on `close()`.
+- New error code `WORKER_FAILED`: a worker stopped mid-read. Later reads run on this thread.
+- `ecw-js/worker` and `createWorkerHandler`: `open` takes `threads`.
+- Demo: a Threads control in the header, and the library version next to its name.
+- Removed a block fetch path that 0.2.2's batched reads had left unused.
+
 ## 0.2.2 (2026-11-02)
 
 - Faster reads from a `File`: each row of neighbouring blocks is read in two slices (its index entries, then its bytes) instead of two slices per block. About 13% faster on a full-resolution read from disk; output unchanged.

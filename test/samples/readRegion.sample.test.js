@@ -5,6 +5,8 @@
 // Guard: exact equality.
 // Level-0 reference is skipped: GDAL's coarsest overview is the level-1
 // reconstruction sampled at even pixels, not record 0's LL.
+// Runs on one thread and on a pool of 2 workers. The pooled runs read the
+// file into memory: Node can't post a disk-backed Blob to a worker.
 // Skips without samples. Run with: node --test test/samples/readRegion.sample.test.js
 //==========================================================
 /* prettier-ignore-file */
@@ -37,8 +39,18 @@ forEachSample(function (sample, label, noSample) {
 var manifestPath = sample && join(sample.refDir, "manifest.json");
 var skip = noSample || (existsSync(manifestPath) ? false : "no ref/manifest.json");
 
-test("readRegion matches GDAL references exactly" + label, { skip: skip, timeout: 300000 }, async function () {
-	var ecw = await openEcw(await openAsBlob(sample.ecwPath));
+// threads 1 reads the file from disk; threads 2 from memory, and checks the pool really ran
+async function openSample(threads) {
+	if (threads === 1) return openEcw(await openAsBlob(sample.ecwPath), { threads: 1 });
+	var ecw = await openEcw(new Blob([readFileSync(sample.ecwPath)]), { threads: threads });
+	await ecw.readRegion({ x: 0, y: 0, width: 1, height: 1 });
+	assert.ok(await ecw._poolStart, "the worker pool started");
+	return ecw;
+}
+
+[1, 2].forEach(function (threads) {
+test("readRegion matches GDAL references exactly, threads " + threads + label, { skip: skip, timeout: 300000 }, async function () {
+	var ecw = await openSample(threads);
 	var manifest = JSON.parse(readFileSync(manifestPath, "utf8")).filter(function (m) { return m.name !== "level-0.tif"; });
 	for (var m of manifest) {
 		var ref = readTiff(new Uint8Array(readFileSync(join(sample.refDir, m.name))));
@@ -48,10 +60,12 @@ test("readRegion matches GDAL references exactly" + label, { skip: skip, timeout
 		assert.ok(r.exact >= MIN_EXACT, m.name + ": exact " + (100 * r.exact).toFixed(1) + "%");
 		console.log("# " + m.name + " level " + img.level + " exact " + (100 * r.exact).toFixed(1) + "% max " + r.max);
 	}
+	await ecw.close();
+});
 });
 
-test("readRegionToScratch strips equal the GDAL references" + label, { skip: skip, timeout: 300000 }, async function () {
-	var ecw = await openEcw(await openAsBlob(sample.ecwPath));
+test("readRegionToScratch strips equal the GDAL references, threads 2" + label, { skip: skip, timeout: 300000 }, async function () {
+	var ecw = await openSample(2);
 	var manifest = JSON.parse(readFileSync(manifestPath, "utf8")).filter(function (m) { return /^crop-/.test(m.name); });
 	for (var m of manifest) {
 		var ref = readTiff(new Uint8Array(readFileSync(join(sample.refDir, m.name))));

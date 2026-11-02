@@ -15,7 +15,8 @@
 		"CHANGELOG.md"
 	],
 	"sideEffects": [
-		"./src/workers/ecwDecodeWorker.js"
+		"./src/workers/ecwDecodeWorker.js",
+		"./src/workers/decodePoolWorker.js"
 	],
 	"engines": {
 		"node": ">=22"

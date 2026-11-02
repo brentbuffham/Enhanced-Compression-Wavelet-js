@@ -100,6 +100,9 @@ test("open forwards the cache option to openEcw", async function () {
 	assert.equal(bad.msg.code, "INVALID_ARGUMENT");
 	assert.match(bad.msg.message, /cache/);
 	assert.equal((await h.send("open", { blob: file(), cache: false })).msg.type, "result");
+	var threads = await h.send("open", { blob: file(), threads: -1 });
+	assert.equal(threads.msg.code, "INVALID_ARGUMENT");
+	assert.match(threads.msg.message, /threads/);
 });
 
 test("a job id that is still running is rejected, and the running job keeps its abort", async function () {

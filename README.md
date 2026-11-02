@@ -138,6 +138,25 @@ await clearBlockCache();   // delete every cached tile
 
 The OPFS tier is keyed by a fingerprint of the file (name, size, date, first 4 KB) and the decoder version, so an edited file or a newer ecw-js never reuses stale tiles. Tiles are written in packs of about 8 MB and the oldest packs go first once `maxBytes` (512 MB by default) is reached. Output is byte for byte the same with or without a cache.
 
+## Several cores
+
+Large reads are split into bands of output rows and decoded on a pool of workers, one band each. The output is byte for byte the same as one thread's, and the GDAL parity tests run both ways.
+
+```js
+var ecw = await openEcw(file);                  // automatic (default)
+var ecw = await openEcw(file, { threads: 1 });  // this thread only
+var ecw = await openEcw(file, { threads: 4 });  // 4 workers for every read
+```
+
+- **Automatic** uses up to 4 workers (one fewer than the cores) for reads of 1 megapixel or more. It never waits for them: the first large read runs on this thread while the pool starts, and later reads use the pool. With `cache: { opfs: true }` it stays on this thread, because the OPFS tile cache lives there.
+- **`threads: n`** starts `n` workers on the first read and waits for them. Each worker keeps its own memory cache, an equal share of `memoryBytes`; the OPFS tier isn't used by pooled reads.
+- The pool belongs to the reader. It closes after 30 seconds without use (the next large read starts it again) and on `ecw.close()`. Each open reader has its own pool, so with several files open, pass `threads` to control the total.
+- If workers can't start, reads carry on on this thread. If a worker dies mid-read, that read fails with `WORKER_FAILED` and later reads use this thread.
+- In the browser, a `File` or `Blob` reaches the workers without being copied, and the pool can be started from inside another Worker. In Node, a Blob from `fs.openAsBlob` can't be posted to a worker, so reads of such a Blob stay on this thread; a Blob made from bytes in memory works.
+- On a 4096 × 4096 full-resolution read in Chrome, 4 workers took about 0.9 s against 2.0 s on one thread.
+
+Bundlers: the pool starts `src/workers/decodePoolWorker.js` with `new Worker(new URL(...), import.meta.url)`, which Vite, Rollup and webpack 5 follow. With Vite, add `ecw-js` to `optimizeDeps.exclude` so the worker file stays next to the module that loads it.
+
 ## In a Worker
 
 Decoding big regions takes a while, so keep it off the main thread. `ecw-js/worker` is a module Worker that speaks a small message protocol: send `{ id, type, payload }`, get back `progress` messages and then one `result` or `error` with the same `id`.
@@ -147,7 +166,7 @@ var worker = new Worker(new URL("ecw-js/worker", import.meta.url), { type: "modu
 worker.onmessage = function (event) {
 	var msg = event.data; // { id, type: "progress", fraction, label } | { id, type: "result", result } | { id, type: "error", code, message }
 };
-worker.postMessage({ id: 1, type: "open", payload: { blob: file } });            // result: ecw.info; add cache: { opfs: true } as in openEcw
+worker.postMessage({ id: 1, type: "open", payload: { blob: file } });            // result: ecw.info; add cache and threads as in openEcw
 worker.postMessage({ id: 2, type: "readRegion", payload: { x: 0, y: 0, width: 4096, height: 4096, outWidth: 1024, outHeight: 1024 } });
 worker.postMessage({ id: 3, type: "readRegionToScratch", payload: { /* same options */ } }); // result: { scratchId, byteLength, ... }
 worker.postMessage({ id: 4, type: "abort", payload: { id: 2 } });                 // job 2 ends with error code ABORTED
@@ -176,6 +195,7 @@ Everything throws or rejects with an `EcwError`. Branch on `error.code`; `error.
 | `OUTPUT_TOO_LARGE` | A region read would exceed the in-memory limit |
 | `ABORTED` | The read was cancelled with an `AbortSignal` |
 | `NOT_IMPLEMENTED` | Reserved for features that aren't available yet. This version doesn't raise it. |
+| `WORKER_FAILED` | A decode worker stopped in the middle of a read; later reads run on this thread |
 
 ## Scope
 

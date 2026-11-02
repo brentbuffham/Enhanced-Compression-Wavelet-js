@@ -3,7 +3,7 @@
 // Message protocol behind the ecw-js/worker entry, kept free of
 // Worker globals so it can be driven directly (tests, custom hosts).
 // In:  { id, type, payload }
-//   open                { blob, cache? }    -> reader info (cache as in openEcw)
+//   open                { blob, cache?, threads? } -> reader info (options as in openEcw)
 //   readRegion          readRegion options  -> { data, width, height, level, bounds }
 //   readRegionToScratch readRegion options  -> { scratchId, width, height, level, bounds, byteLength }
 //   abort               { id }              -> cancels that job (it rejects ABORTED)
@@ -58,7 +58,9 @@ export function createWorkerHandler(post) {
 	var handlers = {
 		open: async function (id, payload) {
 			await closeReader();
-			var options = payload && payload.cache !== undefined ? { cache: payload.cache } : undefined;
+			var options = {};
+			if (payload && payload.cache !== undefined) options.cache = payload.cache;
+			if (payload && payload.threads !== undefined) options.threads = payload.threads;
 			reader = await openEcw(payload && payload.blob, options);
 			return { result: reader.info };
 		},

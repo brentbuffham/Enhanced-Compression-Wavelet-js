@@ -6,10 +6,13 @@
 // writes the library call it made into "How it works".
 //==========================================================
 
-import { openEcw, pixelWindowToBounds, applyTransparency, applyColorKey, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles, blockCacheUsage, clearBlockCache } from "../../src/index.js";
+import { VERSION, openEcw, pixelWindowToBounds, applyTransparency, applyColorKey, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles, blockCacheUsage, clearBlockCache } from "../../src/index.js";
 import { blockSizeColor, sizeRange } from "./lib/colorScale.js";
 import { levelPictureBounds, KEPT_DIR } from "./lib/demoCore.js";
 import { Viewer } from "./viewer.js";
+
+// the library version next to its name, from the code this page runs
+document.getElementById("version").textContent = "v" + VERSION;
 
 var $ = function (id) { return document.getElementById(id); };
 
@@ -119,6 +122,15 @@ function how(code, result) {
 // Opening a file
 //----------------------------------------------------------
 
+// openEcw's threads option: 0 automatic, 1 this thread, n workers
+function threadsChoice() {
+	return Number($("threadsSelect").value);
+}
+
+$("threadsSelect").addEventListener("change", function () {
+	if (file) openFileInDemo(file);
+});
+
 async function openFileInDemo(f, fromKept) {
 	file = f;
 	opened = null;
@@ -130,14 +142,15 @@ async function openFileInDemo(f, fromKept) {
 	startWorker();
 	setProgress(0, "opening");
 	try {
-		reader = await openEcw(f);
-		opened = await run("open", { file: f, opfsCache: $("cacheToggle").checked });
+		// this thread's reader only answers info; decoding runs in the demo worker
+		reader = await openEcw(f, { threads: 1 });
+		opened = await run("open", { file: f, opfsCache: $("cacheToggle").checked, threads: threadsChoice() });
 	} catch (err) {
 		setError(err);
 		how("var ecw = await openEcw(file);", { error: err.code, message: err.message });
 		return;
 	}
-	how("var ecw = await openEcw(file);\necw.info;", reader.info);
+	how("var ecw = await openEcw(file, { threads: " + threadsChoice() + " });   // 0 = automatic\necw.info;", reader.info);
 	$("viewerEmpty").classList.add("hidden");
 	renderInfo();
 	setStats();
