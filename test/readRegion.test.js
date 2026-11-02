@@ -177,3 +177,20 @@ test("reads after close are rejected", async function () {
 	await assert.rejects(ecw.readRegion({ x: 0, y: 0, width: 4, height: 4 }), function (err) { return err.code === "INVALID_ARGUMENT" && /closed/.test(err.message); });
 	await assert.rejects(ecw.readRegionToScratch({ x: 0, y: 0, width: 4, height: 4 }), function (err) { return err.code === "INVALID_ARGUMENT" && /closed/.test(err.message); });
 });
+
+test("a read slices the file once per block-row run, not twice per block", async function () {
+	var blob = file(function (r, b, sb, x, y) { return sb === "LL" ? 50 + x + y : (x * y + r + b) % 3 - 1; });
+	var slices = 0;
+	var counting = { size: blob.size, slice: function (a, b) { slices++; return blob.slice(a, b); } };
+	var direct = await (await openEcw(blob, { cache: false })).readRegion({ x: 0, y: 0, width: 64, height: 48 });
+	var ecw = await openEcw(counting, { cache: false });
+	slices = 0;
+	var img = await ecw.readRegion({ x: 0, y: 0, width: 64, height: 48 });
+	assert.deepEqual(Array.from(img.data), Array.from(direct.data));
+	// 4x4 blocks: every record's grid has several blocks per row, so per-block reads would need far more
+	var blocks = 0;
+	ecw._grid.forEach(function (g) { blocks += g.cols * g.rows; });
+	var rows = 0;
+	ecw._grid.forEach(function (g) { rows += g.rows; });
+	assert.ok(slices <= 2 * rows, slices + " slices for " + rows + " block rows (" + blocks + " blocks)");
+});

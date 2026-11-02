@@ -114,6 +114,48 @@ export function levelEntryWindow(index, gridLevel) {
 }
 
 /**
+ * File byte range of the index entries bounding blocks n0..n1 (inclusive):
+ * one read covers a whole run of neighbouring blocks.
+ * @returns {{start:number, end:number}}
+ */
+export function blockRunEntryWindow(index, n0, n1) {
+	if (!Number.isInteger(n0) || !Number.isInteger(n1) || n0 < 0 || n1 < n0 || n1 >= index.entryCount - 1) {
+		throw new EcwError(ERROR_CODES.INVALID_ARGUMENT, "block run " + n0 + ".." + n1 + " is outside the index");
+	}
+	var start = index.offsetsStart + n0 * ENTRY_LENGTH;
+	return { start: start, end: start + (n1 - n0 + 2) * ENTRY_LENGTH };
+}
+
+/**
+ * File byte ranges of a run of blocks from n0, given the bytes at
+ * blockRunEntryWindow(). The ranges are back to back, so one read of
+ * [first.start, last.end) holds every block in the run.
+ * @param {object} index - parseBlockIndex() result.
+ * @param {number} n0 - First block number.
+ * @param {Uint8Array} entryBytes - (count + 1) entries, 8 bytes each.
+ * @param {number} fileSize
+ * @returns {Array<{start:number, end:number}>}
+ */
+export function blockRunByteRanges(index, n0, entryBytes, fileSize) {
+	var count = entryBytes.length / ENTRY_LENGTH - 1;
+	var source = new MemorySource(entryBytes);
+	var entryPos = index.offsetsStart + n0 * ENTRY_LENGTH;
+	var prev = readU64(source, 0, true);
+	if (prev === null) throw badIndex("block offset too large", entryPos);
+	var ranges = [];
+	for (var i = 1; i <= count; i++) {
+		var next = readU64(source, i * ENTRY_LENGTH, true);
+		if (next === null) throw badIndex("block offset too large", entryPos + i * ENTRY_LENGTH);
+		if (next < prev) throw badIndex("block offsets fall", entryPos + i * ENTRY_LENGTH);
+		ranges.push({ start: index.dataStart + prev, end: index.dataStart + next });
+		prev = next;
+	}
+	var end = index.dataStart + prev;
+	if (end > fileSize) throw new EcwError(ERROR_CODES.TRUNCATED, "block " + (n0 + count - 1) + " ends past the file", end);
+	return ranges;
+}
+
+/**
  * File byte range of block n from its two index entries.
  * @param {object} index - parseBlockIndex() result.
  * @param {number} n - Block number.

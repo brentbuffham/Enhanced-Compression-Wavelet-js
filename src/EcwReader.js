@@ -13,7 +13,7 @@ import { BlobSource } from "./io/BlobSource.js";
 import { MemorySource } from "./io/MemorySource.js";
 import { parseHeader } from "./format/EcwHeader.js";
 import { parseLevels } from "./format/EcwLevels.js";
-import { parseBlockIndex, blockGrid, blockEntryWindow, blockByteRange } from "./format/EcwBlockIndex.js";
+import { parseBlockIndex, blockGrid, blockEntryWindow, blockByteRange, blockRunEntryWindow, blockRunByteRanges } from "./format/EcwBlockIndex.js";
 import { pixelWindowToBounds } from "./format/georef.js";
 import { createDecodeContext, decodeWindow, imageLevelSize, countWindowBlocks } from "./decode/RegionDecoder.js";
 import { sampleWindow } from "./decode/sampleWindow.js";
@@ -151,6 +151,14 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 			var w = blockEntryWindow(index, n);
 			var r = blockByteRange(index, n, await blobSource.read(w.start, w.end), blobSource.size);
 			return blobSource.read(r.start, r.end);
+		},
+		// a row of neighbouring blocks is back to back in the file: two reads for the lot
+		fetchBlocks: async function (n0, n1) {
+			var w = blockRunEntryWindow(index, n0, n1);
+			var ranges = blockRunByteRanges(index, n0, await blobSource.read(w.start, w.end), blobSource.size);
+			var base = ranges[0].start;
+			var bytes = await blobSource.read(base, ranges[ranges.length - 1].end);
+			return ranges.map(function (r) { return bytes.subarray(r.start - base, r.end - base); });
 		}
 	});
 	var total = countWindowBlocks(ctx, plan.level, lx0, ly0, lx1, ly1);

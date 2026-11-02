@@ -10,7 +10,7 @@ import { decodeWindow, imageLevelSize, createDecodeContext, countWindowBlocks } 
 import { synthesizeWindow } from "../../src/codec/wavelet.js";
 import { parseHeader } from "../../src/format/EcwHeader.js";
 import { parseLevels } from "../../src/format/EcwLevels.js";
-import { parseBlockIndex, blockGrid, blockEntryWindow, blockByteRange } from "../../src/format/EcwBlockIndex.js";
+import { parseBlockIndex, blockGrid, blockEntryWindow, blockByteRange, blockRunEntryWindow, blockRunByteRanges } from "../../src/format/EcwBlockIndex.js";
 import { MemorySource } from "../../src/io/MemorySource.js";
 import { buildCodedFile } from "../helpers/buildCodedFile.js";
 
@@ -293,4 +293,29 @@ test("tiles the cache drops are recomputed, output unchanged", async function ()
 		var plain = await decodeWindow(contextFor(bytes).ctx, 4, 7 + k, 5, 50, 40);
 		for (var b = 0; b < 3; b++) assert.deepEqual(Array.from(got.bands[b]), eighths(plain.bands[b]), "pass " + k + " band " + b);
 	}
+});
+
+test("fetchBlocks reads each block row's missing run once and decodes the same pixels", async function () {
+	var o = { width: 64, height: 48, levelCount: 3, coeff: hash };
+	var bytes = buildCodedFile(o).bytes;
+	var single = contextFor(bytes);
+	var runs = [];
+	var batched = contextFor(bytes);
+	batched.ctx.fetchBlocks = async function (n0, n1) {
+		runs.push([n0, n1]);
+		var w = blockRunEntryWindow(batched.ctx.index, n0, n1);
+		return blockRunByteRanges(batched.ctx.index, n0, bytes.subarray(w.start, w.end), bytes.length).map(function (r) { return bytes.subarray(r.start, r.end); });
+	};
+	var done = [];
+	batched.ctx.onBlock = function (n) { done.push(n); };
+	var a = await decodeWindow(single.ctx, 3, 5, 3, 61, 45);
+	var b = await decodeWindow(batched.ctx, 3, 5, 3, 61, 45);
+	assert.deepEqual(b.bands.map(function (x) { return Array.from(x); }), a.bands.map(function (x) { return Array.from(x); }));
+	assert.equal(batched.fetches(), 0, "fetchBlock is not used when fetchBlocks is given");
+	var blocks = runs.reduce(function (s, r) { return s + r[1] - r[0] + 1; }, 0);
+	assert.equal(blocks, single.fetches(), "every block fetched exactly once");
+	assert.ok(runs.length < blocks, "runs cover several blocks each");
+	assert.deepEqual(done, done.map(function (_, i) { return i + 1; }), "onBlock still counts blocks one by one");
+	var seen = new Set();
+	runs.forEach(function (r) { for (var n = r[0]; n <= r[1]; n++) { assert.ok(!seen.has(n), "block " + n + " fetched twice"); seen.add(n); } });
 });

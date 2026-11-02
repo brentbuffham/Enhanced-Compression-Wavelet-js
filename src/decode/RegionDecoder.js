@@ -26,11 +26,14 @@ import { synthesizeWindow, requiredCoefficientWindow } from "../codec/wavelet.js
 
 /**
  * @param {{header:object, levels:Array, index:object, grid:Array,
- *   fetchBlock:function(number): Promise<Uint8Array>, signal?:AbortSignal,
+ *   fetchBlock:function(number): Promise<Uint8Array>,
+ *   fetchBlocks?:function(number, number): Promise<Uint8Array[]>, signal?:AbortSignal,
  *   onBlock?:function(number), tileCache?:object}} o
  *   tileCache (BlockCache): { tileSize, get(j, tx, ty) -> Promise<tile|null>,
  *   put(j, tx, ty, tile) -> Promise } holding reconstructed level tiles
  *   { width, height, bands } at full precision.
+ *   fetchBlocks(n0, n1), when given, returns blocks n0..n1 (inclusive) in one
+ *   go and is used instead of fetchBlock for runs of neighbouring blocks.
  * @returns {object} decode context
  */
 export function createDecodeContext(o) {
@@ -40,6 +43,7 @@ export function createDecodeContext(o) {
 		index: o.index,
 		grid: o.grid,
 		fetchBlock: o.fetchBlock,
+		fetchBlocks: o.fetchBlocks,
 		signal: o.signal,
 		onBlock: o.onBlock,
 		tileCache: o.tileCache || null,
@@ -70,9 +74,30 @@ async function getBlock(ctx, record, row, col) {
 	var cached = ctx.blocks.get(n);
 	if (cached) return cached;
 	checkAbort(ctx);
+	return addBlock(ctx, record, row, col, await ctx.fetchBlock(n));
+}
+
+// Load the blocks of one block row, columns c0..c1, that aren't loaded yet:
+// one fetchBlocks call per run of missing neighbours
+async function loadBlockRow(ctx, record, row, c0, c1) {
+	if (!ctx.fetchBlocks) return;
+	var base = ctx.grid[record].firstBlock + row * ctx.grid[record].cols;
+	for (var c = c0; c <= c1; c++) {
+		if (ctx.blocks.has(base + c)) continue;
+		var end = c;
+		while (end < c1 && !ctx.blocks.has(base + end + 1)) end++;
+		checkAbort(ctx);
+		var list = await ctx.fetchBlocks(base + c, base + end);
+		for (var k = c; k <= end; k++) addBlock(ctx, record, row, k, list[k - c]);
+		c = end;
+	}
+}
+
+// Frame one fetched block and memoise it
+function addBlock(ctx, record, row, col, bytes) {
 	var h = ctx.header;
 	var lv = ctx.levels[record];
-	var bytes = await ctx.fetchBlock(n);
+	var n = ctx.grid[record].firstBlock + row * ctx.grid[record].cols + col;
 	ctx.fetched++;
 	if (ctx.onBlock) ctx.onBlock(ctx.fetched);
 	var streams = splitBlockStreams(bytes, h.bands, record);
@@ -112,6 +137,7 @@ async function readCoefficients(ctx, record, subbands, x0, y0, x1, y1) {
 	}
 	var bw = h.blockWidth, bh = h.blockHeight;
 	for (var row = Math.floor(y0 / bh); row <= Math.floor((y1 - 1) / bh); row++) {
+		await loadBlockRow(ctx, record, row, Math.floor(x0 / bw), Math.floor((x1 - 1) / bw));
 		for (var col = Math.floor(x0 / bw); col <= Math.floor((x1 - 1) / bw); col++) {
 			var entry = await getBlock(ctx, record, row, col);
 			var ox = col * bw, oy = row * bh;

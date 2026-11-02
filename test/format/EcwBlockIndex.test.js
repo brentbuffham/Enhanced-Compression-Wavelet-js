@@ -8,7 +8,7 @@
 /* prettier-ignore-file */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseBlockIndex, blockGrid, totalBlocks, blockNumber, blockEntryWindow, levelEntryWindow, blockByteRange, checkBlockIndex } from "../../src/format/EcwBlockIndex.js";
+import { parseBlockIndex, blockGrid, totalBlocks, blockNumber, blockEntryWindow, levelEntryWindow, blockByteRange, checkBlockIndex, blockRunEntryWindow, blockRunByteRanges } from "../../src/format/EcwBlockIndex.js";
 import { parseHeader } from "../../src/format/EcwHeader.js";
 import { parseLevels } from "../../src/format/EcwLevels.js";
 import { MemorySource } from "../../src/io/MemorySource.js";
@@ -122,4 +122,43 @@ test("file ending inside the index header throws TRUNCATED", function () {
 test("zero block size throws BAD_BLOCK_INDEX at the header field", function () {
 	assert.throws(function () { open({ headerOverrides: { blockWidth: 0 }, entries: [0] }); }, { code: "BAD_BLOCK_INDEX", offset: 0x12 });
 	assert.throws(function () { open({ headerOverrides: { blockHeight: 0 }, entries: [0] }); }, { code: "BAD_BLOCK_INDEX", offset: 0x14 });
+});
+
+test("blockRunByteRanges gives every block of a run the same range as blockByteRange", function () {
+	var f = open({ blocks: numberedBlocks(56) });
+	[[0, 0], [4, 7], [16, 55], [20, 23]].forEach(function (run) {
+		var w = blockRunEntryWindow(f.index, run[0], run[1]);
+		assert.equal(w.end - w.start, 8 * (run[1] - run[0] + 2));
+		var ranges = blockRunByteRanges(f.index, run[0], f.bytes.subarray(w.start, w.end), f.bytes.length);
+		assert.equal(ranges.length, run[1] - run[0] + 1);
+		ranges.forEach(function (r, i) {
+			var n = run[0] + i;
+			var one = blockEntryWindow(f.index, n);
+			assert.deepEqual(r, blockByteRange(f.index, n, f.bytes.subarray(one.start, one.end), f.bytes.length));
+		});
+	});
+});
+
+test("blockRunEntryWindow rejects runs outside the index or reversed", function () {
+	var f = open({ blocks: numberedBlocks(56) });
+	assert.throws(function () { blockRunEntryWindow(f.index, 50, 56); }, { code: "INVALID_ARGUMENT" });
+	assert.throws(function () { blockRunEntryWindow(f.index, -1, 2); }, { code: "INVALID_ARGUMENT" });
+	assert.throws(function () { blockRunEntryWindow(f.index, 5, 4); }, { code: "INVALID_ARGUMENT" });
+});
+
+test("blockRunByteRanges checks every entry: falling, oversized and truncated", function () {
+	var f = open({ entries: [0, 10, 5, 20] });
+	var w = blockRunEntryWindow(f.index, 0, 2);
+	assert.throws(function () { blockRunByteRanges(f.index, 0, f.bytes.subarray(w.start, w.end), 1e9); }, { code: "BAD_BLOCK_INDEX", offset: w.start + 16 });
+	var r = open({ entries: [0, 10, 20, 30] });
+	var wr = blockRunEntryWindow(r.index, 0, 2);
+	var big = r.bytes.slice(wr.start, wr.end);
+	big.fill(0xFF, 24, 32);
+	assert.throws(function () { blockRunByteRanges(r.index, 0, big, 1e18); }, { code: "BAD_BLOCK_INDEX", offset: wr.start + 24 });
+	big = r.bytes.slice(wr.start, wr.end);
+	big.fill(0xFF, 0, 8);
+	assert.throws(function () { blockRunByteRanges(r.index, 0, big, 1e18); }, { code: "BAD_BLOCK_INDEX", offset: wr.start });
+	var g = open({ entries: [0, 5, 100] });
+	var wg = blockRunEntryWindow(g.index, 0, 1);
+	assert.throws(function () { blockRunByteRanges(g.index, 0, g.bytes.subarray(wg.start, wg.end), g.bytes.length); }, { code: "TRUNCATED", offset: g.index.dataStart + 100 });
 });
