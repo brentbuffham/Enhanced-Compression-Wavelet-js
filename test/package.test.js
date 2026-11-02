@@ -37,3 +37,9 @@ test("CHANGELOG has a section for the package version", function () {
 test("the worker entry is exported and shipped", function () {
 	assert.equal(pkg.exports["./worker"], "./src/workers/ecwDecodeWorker.js");
 });
+
+test("the worker protocol is exported for hosts that install their own handler", async function () {
+	assert.equal(pkg.exports["./workerProtocol"], "./src/workers/workerProtocol.js");
+	var mod = await import("ecw-js/workerProtocol");
+	assert.equal(typeof mod.createWorkerHandler, "function");
+});

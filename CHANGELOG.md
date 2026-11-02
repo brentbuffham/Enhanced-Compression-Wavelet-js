@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2 (2026-11-02)
+
+- Faster reads from a `File`: each row of neighbouring blocks is read in two slices (its index entries, then its bytes) instead of two slices per block. About 13% faster on a full-resolution read from disk; output unchanged.
+- `ecw-js/workerProtocol` exports `createWorkerHandler`, for hosts that install their own Worker handler.
+
 ## 0.2.1 (2026-11-02)
 
 - Reads on a closed reader now fail with `INVALID_ARGUMENT` instead of running without the cache.

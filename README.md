@@ -156,6 +156,8 @@ worker.postMessage({ id: 5, type: "close" });
 
 The file is structured-cloned into the Worker without copying its bytes, and pixel buffers come back transferred. Read a scratch result on the main thread with `getScratchFile(scratchId)`.
 
+To install the handler yourself (your own Worker entry, or another host), import `createWorkerHandler` from `ecw-js/workerProtocol`: `createWorkerHandler(post)` returns the message handler and `post(msg, transfer)` sends replies.
+
 A Worker holds one file at a time. Sending `open` or `close` aborts the reads still running on the current file (they end with `ABORTED`), waits for them, then closes it. Closing deletes that file's scratch results, so copy out what you need first. Each `id` must be unique among running jobs; a duplicate gets `INVALID_ARGUMENT`.
 
 ## Errors
