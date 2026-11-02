@@ -6,7 +6,7 @@
 //==========================================================
 
 /** Library version, matches package.json. */
-export var VERSION = "0.2.2";
+export var VERSION = "0.3.0";
 
 export { openEcw } from "./EcwReader.js";
 export { EcwError, ERROR_CODES } from "./errors.js";

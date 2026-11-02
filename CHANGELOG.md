@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0 (unreleased)
+## 0.3.0 (2026-11-02)
 
 - **Several cores.** Large reads are split into bands of rows and decoded on a pool of workers. On a 4096 × 4096 full-resolution read in Chrome, 4 workers took about 0.9 s against 2.0 s on one thread. Output is unchanged, and the GDAL parity tests run with one thread and with two workers.
 - `openEcw(file, { threads })`: unset or 0 is automatic (up to 4 workers for reads of 1 megapixel or more, started in the background so no read waits for them), 1 keeps reads on this thread, `n` uses `n` workers.
