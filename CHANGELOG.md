@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 (2026-11-02)
 
 - Reads on a closed reader now fail with `INVALID_ARGUMENT` instead of running without the cache.
 - `ecw-js/worker`: `open` takes `cache` (the same as `openEcw`). `open` and `close` abort the reads still running and wait for them before closing the file. A job `id` that is still running is rejected.
