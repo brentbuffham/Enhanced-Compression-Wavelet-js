@@ -148,6 +148,7 @@ var ecw = await openEcw(file, { threads: 1 });  // this thread only
 var ecw = await openEcw(file, { threads: 4 });  // 4 workers for every read
 ```
 
+- **Automatic is the default.** Callers that don't pass `threads`, including an `open` message to `ecw-js/worker` or `createWorkerHandler` without it, get the pool from 0.3.0 on. Pass `threads: 1` to keep 0.2 behaviour.
 - **Automatic** uses up to 4 workers (one fewer than the cores) for reads of 1 megapixel or more. It never waits for them: the first large read runs on this thread while the pool starts, and later reads use the pool. With `cache: { opfs: true }` it stays on this thread, because the OPFS tile cache lives there.
 - **`threads: n`** starts `n` workers on the first read and waits for them. Each worker keeps its own memory cache, an equal share of `memoryBytes`; the OPFS tier isn't used by pooled reads.
 - The pool belongs to the reader. It closes after 30 seconds without use (the next large read starts it again) and on `ecw.close()`. Each open reader has its own pool, so with several files open, pass `threads` to control the total.
