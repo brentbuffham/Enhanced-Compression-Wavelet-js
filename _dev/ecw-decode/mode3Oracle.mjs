@@ -64,6 +64,8 @@ function encodeValues(s, vals) {
 }
 
 function craftAndRead(name, stream) {
+	// ORACLE_TAG keeps parallel sessions from overwriting each other's files
+	if (process.env.ORACLE_TAG) name = process.env.ORACLE_TAG + "-" + name;
 	var bytes = craftEcw({ width: 2 * W, height: 2 * H, levelCount: 1, bands: 3, block: 64,
 		coeff: function (r, b, sb) { return b === 0 && sb === "LL" ? 100 : 0; },
 		streamOverride: function (r, b, sb) { return b === 0 && sb === "LH" ? stream : null; } });
