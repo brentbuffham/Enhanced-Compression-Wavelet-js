@@ -190,6 +190,11 @@ Source: one private sample (D) whose full census (`modeCensus.mjs`) found 137 mo
   - The first wrong value is index 19, whatever the prefix values were.
   - Coding every byte except the lead through a 256-symbol quasistatic model (rebuild interval 18, doubled to 36) makes index 18 come out right for every model precision tried (2^10–2^16), while index 19 stays wrong. Coding the lead through the model too breaks index 18.
   - So a byte model that rebuilds after 36 byte updates, not counting the lead byte, fits the timing. The rebuilt contents are still unknown.
+  - First rebuilt table, measured (PINK). Method: 19 coefficients of +5 coded raw, then one 16-bit position z with zeros after.
+    - H18: byte 0 covers [0, ≈14,670)/65,536 (0.2238), and the next symbol up is byte 0x01, so the byte order is kept.
+    - L19: byte 0 covers about 0.232–0.234 of its range, 4% wider than H's. Bytes 1–4 each get less than 0.0005.
+    - So unseen bytes get almost nothing after the rebuild, and that rules out halve-and-OR-1 (129/65,536 each). About 0.55 of the range sits elsewhere: high bytes, or an escape.
+  - An equally good reading of the timing: separate low-byte and high-byte models, each rebuilding after 18 updates, with the leading 00 counted as the high byte of a virtual coefficient −1. The high-byte model's 19th decode is then H18 and the low-byte model's is L19, which matches both measured first-changed bytes. Not yet tested.
 - Open: how the tables update. They don't follow the quasistatic model's batched rebuilds, and they don't follow simple +inc counts. A table can change after one use, and contexts 0–14 appear to share state. Also open: the meaning of the non-literal symbols.
 - Why a wide overview read fails on a block outside its window: tile-cache padding, not a bug. With the cache off, or with 8 px tiles, the same read succeeds. With the default 32 px tiles (or 64 px), each level's window is rounded out to whole tiles. That rounding at two levels, plus the synthesis filter's reach, crosses into the next block row and column of a coarse record. Output pixels are the same either way.
 - Working hypothesis (not confirmed): an adaptive arithmetic/range coder whose models start flat, so the first symbols come out close to raw and the output then becomes dense. The leading `00` and the length trailer would be framing around it.
