@@ -22,8 +22,9 @@ var TOP = 0x80000000, SHIFT = 23, BOTTOM = 1 << 23;
 
 // Schindler encoder state (header byte = mode byte 3, dropped from the payload)
 function Enc() { return { low: 0, range: TOP, buffer: 3, help: 0, out: [], count: 0 }; }
+var NORM_LT = process.env.NORM_LT === "1";
 function norm(s) {
-	while (s.range <= BOTTOM) {
+	while (NORM_LT ? s.range < BOTTOM : s.range <= BOTTOM) {
 		if (s.low < 0xff * BOTTOM) { s.out.push(s.buffer & 0xff); for (; s.help; s.help--) s.out.push(0xff); s.buffer = (s.low >>> SHIFT) & 0xff; }
 		else if (s.low >= TOP) { s.out.push((s.buffer + 1) & 0xff); for (; s.help; s.help--) s.out.push(0); s.buffer = (s.low >>> SHIFT) & 0xff; }
 		else s.help++;
@@ -127,8 +128,11 @@ if (cmd === "validate") {
 			else if (kv[0] === "n") ef(s, 1, v, 16);
 			else if (kv[0] === "hi") { ef(s, HI.sf, HI.lt, HI.tot); ef(s, 1, v & 0xff, 256); }
 			else if (kv[0] === "lo") { ef(s, LO.sf, LO.lt, LO.tot); ef(s, 1, v & 0xff, 256); }
+			else if (kv[0] === "f") ef(s, Number(kv[1]), Number(kv[2]), Number(kv[3]));   // f:<width>:<start>:<total>
+			else if (kv[0] === "b") ef(s, 1, v & 0xff, 256);                                // b:<byte> (uniform 8 bits)
 		});
-		for (var q = 0; q < 8; q++) ef(s, 1, 0, 65536);
+		var fill = process.env.FILL === undefined ? 8 : Number(process.env.FILL);
+		for (var q = 0; q < fill; q++) ef(s, 1, 0, 65536);
 		var got = craftAndRead("m3-seq", finish(s));
 		console.log(spec.slice(0, 30) + "... -> " + got.plane.slice(0, 24).join(" ") + (got.exact ? "" : "  (" + got.mismatches + " px off)"));
 	});
