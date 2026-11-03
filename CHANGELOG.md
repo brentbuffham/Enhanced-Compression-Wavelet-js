@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-11-03)
 
 - **New error code `UNSUPPORTED_MODE`.** A stream in a mode ecw-js doesn't decode now raises `UNSUPPORTED_MODE` instead of `BAD_BLOCK`, with `error.mode` holding the mode byte. Its message asks for an ECW that uses the mode, sent to blastingapps.com, so support can be added clean-room. `BAD_BLOCK` now means a damaged block only.
 - **Errors name their block.** `BAD_BLOCK` and `UNSUPPORTED_MODE` errors raised from a block have `error.block` (`{ number, level, row, col, offset }`), and the message starts with the same location. `error.offset` is now always a file offset; it used to be relative to the block for stream table errors. Errors from workers keep these fields.
