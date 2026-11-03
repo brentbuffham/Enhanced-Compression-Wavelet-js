@@ -31,7 +31,12 @@ function norm(s) {
 		s.range = (s.range * 256) >>> 0; s.low = ((s.low * 256) % TOP) >>> 0; s.count++;
 	}
 }
-function ef(s, sf, lt, tot) { norm(s); var r = Math.floor(s.range / tot), t = r * lt; s.low += t; if (lt + sf < tot) s.range = r * sf; else s.range -= t; }
+// NOREM=1: no leftover range for the last symbol (range = r * sf always)
+var NOREM = process.env.NOREM === "1";
+var ROUNDS = [];
+function ef(s, sf, lt, tot) { norm(s); if (s.range % tot) ROUNDS.push("step " + (s.steps || 0) + ": range " + s.range + " % " + tot + " = " + (s.range % tot)); s.steps = (s.steps || 0) + 1; if (process.env.CEILMD === "1") { var a1 = Math.ceil(s.range * lt / tot), b1 = Math.ceil(s.range * (lt + sf) / tot); s.low += a1; s.range = b1 - a1; return; }
+	if (process.env.MULDIV === "1") { var a0 = Math.floor(s.range * lt / tot), b0 = Math.floor(s.range * (lt + sf) / tot); s.low += a0; s.range = b0 - a0; return; }
+	var r = process.env.CEIL === "1" ? Math.ceil(s.range / tot) : Math.floor(s.range / tot), t = r * lt; s.low += t; if (NOREM || lt + sf < tot) s.range = r * sf; else s.range -= t; }
 function finish(s) {
 	norm(s);
 	var t = (s.low >>> SHIFT) + 1;
@@ -47,6 +52,32 @@ function finish(s) {
 }
 
 var HI = { lt: 904, sf: 60, tot: 1024 }, LO = { lt: 3646, sf: 225, tot: 4096 };
+// ENC32=1: a 32-bit range encoder (range starts at 2^32, renormalise below 2^24,
+// carries propagated into bytes already written). The real mode-3 streams decode
+// the same with 32-, 40- or 48-bit decoders, but not with the 31-bit one above.
+if (process.env.ENC32 === "1") {
+	Enc = function () { return { low: 0, range: 4294967296, out: [3] }; };
+	norm = function (s) {
+		while (s.range < 16777216) {
+			if (s.low >= 4294967296) { s.low -= 4294967296; for (var i = s.out.length - 1; i >= 1; i--) { if (s.out[i] === 255) s.out[i] = 0; else { s.out[i]++; break; } } }
+			s.out.push(Math.floor(s.low / 16777216));
+			s.low = (s.low % 16777216) * 256; s.range *= 256;
+		}
+	};
+	ef = function (s, sf, lt, tot) { norm(s); var r = Math.floor(s.range / tot), q = r * lt; s.low += q; if (lt + sf < tot) s.range = r * sf; else s.range -= q; };
+	finish = function (s) {
+		for (var k = 0; k < 5; k++) {
+			if (s.low >= 4294967296) { s.low -= 4294967296; for (var i = s.out.length - 1; i >= 1; i--) { if (s.out[i] === 255) s.out[i] = 0; else { s.out[i]++; break; } } }
+			s.out.push(Math.floor(s.low / 16777216)); s.low = (s.low % 16777216) * 256;
+		}
+		var payload = s.out.slice(1);
+		for (var q = 0; q < (Number(process.env.PAD) || 64); q++) payload.push(0);
+		var len = payload.length + 3;
+		payload.push((len >> 16) & 0xff, (len >> 8) & 0xff, len & 0xff);
+		return Uint8Array.from([3].concat(payload));
+	};
+}
+
 // Encode coefficients with the established structure (static tables: exact for the first two table uses)
 function encodeValues(s, vals) {
 	var prev = 0;
@@ -133,6 +164,7 @@ if (cmd === "validate") {
 		});
 		var fill = process.env.FILL === undefined ? 8 : Number(process.env.FILL);
 		for (var q = 0; q < fill; q++) ef(s, 1, 0, 65536);
+		if (process.env.TRACE_ROUND) { console.log("rounding steps: " + (ROUNDS.length ? ROUNDS.join("; ") : "none")); ROUNDS = []; if (process.env.TRACE_ROUND === "only") return; }
 		var got = craftAndRead("m3-seq", finish(s));
 		console.log(spec.slice(0, 30) + "... -> " + got.plane.slice(0, 24).join(" ") + (got.exact ? "" : "  (" + got.mismatches + " px off)"));
 	});

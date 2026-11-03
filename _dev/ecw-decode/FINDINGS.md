@@ -158,6 +158,17 @@ Source: one private sample (D) whose full census (`modeCensus.mjs`) found 137 mo
   - Context 15: any number of consecutive uses decode exactly.
   - Contexts 0–14: the first use decodes exactly. After any context 0–14 use, the next table use (any context) still decodes its literal byte, but the following raw unit reads exactly one low (X → X − 1 for X = 2..64). Larger X also moves the byte.
   - Not explained by any of these: literal count increments, scaled totals (×2…×255), two-step flag coding, byte+nibble as one 12-bit unit, or `<` versus `<=` renormalisation. The offset is the size of coder rounding, not a table count.
+- ⭐ The arithmetic is a 32-bit range coder, not Schindler's 31-bit one. Code value = the first 4 payload bytes, range starts at 2^32, renormalise while range < 2^24, and the last symbol of a table takes the leftover range.
+  - Raw 16-bit units come out byte-identical under both coders, which is why the raw prefix never told them apart.
+  - The real streams decode identically with 32-, 40- and 48-bit decoders, and worse with the 31-bit one (247 vs 229 matching coefficients over the 31 solved streams).
+  - In the oracle, every "X − 1 after N table uses" failure was rounding in my 31-bit encoder. Each context-15 use multiplies the range by 15 (the 60-wide literal) and each context 0–14 use by 15² (225), so at 15⁴ the 31-bit coder rounds where the 32-bit one doesn't.
+  - With a 32-bit encoder (`ENC32=1` in `mode3Oracle.mjs`) those sequences decode exactly.
+  - The 3-byte length trailer and leading byte remain as described. (The trailer matches Schindler's done_encoding output, but the arithmetic does not.)
+- Genuine model changes that remain, with exact arithmetic:
+  - A run of context-15 literals decodes exactly for uses 1–5 and breaks at use 6. Schindler's quasistatic rebuild of a 17-symbol table with literal-only updates does not predict this table (targets 3–2000 tried).
+  - All-raw streams break at coefficient 19 (PINK).
+  - On real streams the remaining failures are raw reads one byte low and missed sign peeks, at coefficients 5–13.
+- Readout caution (PINK): the pixel solver splits values across neighbours when coefficients beyond about ±130 clamp the pixels. Only trust specific surviving values next to such junk.
 - Open: how the tables update. They don't follow the quasistatic model's batched rebuilds, and they don't follow simple +inc counts. A table can change after one use, and contexts 0–14 appear to share state. Also open: the meaning of the non-literal symbols.
 - Why a wide overview read fails on a block outside its window: tile-cache padding, not a bug. With the cache off, or with 8 px tiles, the same read succeeds. With the default 32 px tiles (or 64 px), each level's window is rounded out to whole tiles. That rounding at two levels, plus the synthesis filter's reach, crosses into the next block row and column of a coarse record. Output pixels are the same either way.
 - Working hypothesis (not confirmed): an adaptive arithmetic/range coder whose models start flat, so the first symbols come out close to raw and the output then becomes dense. The leading `00` and the length trailer would be framing around it.
