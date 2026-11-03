@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-11-03)
+
+- **Stream mode 3 is decoded.** It's an adaptive range coder over bytes: a textbook quasistatic model, 257 symbols at total 4096, with the coefficients as little-endian int16. It turns up in short blocks cut off by a level's bottom edge. Files that raised `UNSUPPORTED_MODE` for mode 3 in 0.4.0 now read in full; with `onBadBlock: "skip"` they no longer list those blocks in `badBlocks`.
+- `STREAM_MODE.RANGE_CODED` (3).
+- Spec: `docs/ECW_FORMAT_SPEC.md` gains "Mode 3: range-coded bytes". README: decoded modes are now 2, 3, 5 and 6.
+
 ## 0.4.0 (2026-11-03)
 
 - **New error code `UNSUPPORTED_MODE`.** A stream in a mode ecw-js doesn't decode now raises `UNSUPPORTED_MODE` instead of `BAD_BLOCK`, with `error.mode` holding the mode byte. Its message asks for an ECW that uses the mode, sent to blastingapps.com, so support can be added clean-room. `BAD_BLOCK` now means a damaged block only.

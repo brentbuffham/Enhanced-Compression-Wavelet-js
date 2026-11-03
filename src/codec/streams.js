@@ -1,17 +1,19 @@
 // src/codec/streams.js
 //==========================================================
 // Coefficient stream decoders (FINDINGS.md "mode 6 streams",
-// "mode 2 streams"). Each returns exactly `count` coefficients,
-// row by row over the block's extent in its level.
+// "mode 2 streams", "mode 3 streams"). Each returns exactly `count`
+// coefficients, row by row over the block's extent in its level.
 //   mode 5: empty, all zeros
 //   mode 6: u16 LE words; top 2 bits 00 = +m, 01 = -m, 10 = m zeros
 //   mode 2: u16 LE node count N, pre-order Huffman tree of N tokens
 //           (0x00 internal, 0x80 + u16 word leaf, 0x4v +v, 0x5v -v,
 //           0x6v v zeros), then codes read LSB-first, bit 0 = left
+//   mode 3: range-coded bytes, adaptive order-0 model (rangeCoded.js)
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
 import { STREAM_MODE, unsupportedModeError } from "../format/EcwBlockFrame.js";
+import { decodeMode3 } from "./rangeCoded.js";
 
 var TAG_PLUS = 0;
 var TAG_MINUS = 1;
@@ -125,5 +127,6 @@ export function decodeStream(stream, count) {
 	if (stream.mode === STREAM_MODE.EMPTY) return new Int32Array(count);
 	if (stream.mode === STREAM_MODE.CODED_B) return decodeMode6(stream.bytes, count);
 	if (stream.mode === STREAM_MODE.CODED_A) return decodeMode2(stream.bytes, count);
+	if (stream.mode === STREAM_MODE.RANGE_CODED) return decodeMode3(stream.bytes, count);
 	throw unsupportedModeError(stream.mode, "a stream");
 }

@@ -27,7 +27,7 @@ function buildBlock(streams) {
 function emptyStreams(n) { return Array.from({ length: n }, function () { return [5]; }); }
 
 test("STREAM_MODE values and streamCount", function () {
-	assert.deepEqual(STREAM_MODE, { EMPTY: 5, CODED_A: 2, CODED_B: 6 });
+	assert.deepEqual(STREAM_MODE, { EMPTY: 5, CODED_A: 2, CODED_B: 6, RANGE_CODED: 3 });
 	assert.ok(Object.isFrozen(STREAM_MODE));
 	assert.equal(streamCount(3, 0), 12);
 	assert.equal(streamCount(3, 4), 9);

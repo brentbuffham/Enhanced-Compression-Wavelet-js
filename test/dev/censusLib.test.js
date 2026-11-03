@@ -37,7 +37,7 @@ function census() {
 }
 
 test("supported modes follow STREAM_MODE", function () {
-	assert.deepEqual(SUPPORTED_MODES, [2, 5, 6]);
+	assert.deepEqual(SUPPORTED_MODES, [2, 3, 5, 6]);
 });
 
 test("counts modes per level, per slot and in edge blocks", function () {

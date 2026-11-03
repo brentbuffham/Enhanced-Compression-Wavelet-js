@@ -111,6 +111,7 @@ Each stream starts with a mode byte:
 | `5` | Empty: every coefficient is 0. The stream is just this byte. |
 | `6` | Run-length words |
 | `2` | Huffman-coded run-length symbols |
+| `3` | Range-coded bytes (seen in short edge blocks) |
 
 A stream decodes to exactly `pw × ph` coefficients, row by row, where `pw` and `ph` are the block's extent within its record (64×64 except at the right and bottom edges).
 
@@ -139,6 +140,22 @@ The stream ends exactly when the block's coefficient count is reached.
 3. The code bits, read least-significant bit first within each byte. Bit `0` goes left, `1` goes right.
 
 Decode leaves until the block's coefficient count is reached; it always ends on a leaf. A tree with a single leaf repeats that leaf. The encoder leaves 8 to 15 unused bits at the end.
+
+### Mode 3: range-coded bytes
+
+An adaptive range coder over bytes, in the textbook form from the general range-coding literature (a carry-handling coder with a quasistatic frequency model).
+
+- **Coder.** 31-bit range, 7 extra bits, renormalise while `range ≤ 2^23`. The mode byte is the coder's header byte, so decoding starts on the first payload byte: `buffer = byte[0]`, `low = buffer >> 1`, `range = 2^7`. On each renormalisation, `low = (low << 8) | ((buffer << 7) & 0xFF)`, then the next byte becomes `buffer`, `low |= buffer >> 1` and `range <<= 8`. Reads past the end give 0.
+- **Decoding a symbol.** `help = floor(range / 4096)`, `t = min(floor(low / help), 4095)`, and the symbol `s` is the one whose band `[cf[s], cf[s+1])` holds `t`. Then `low −= help × cf[s]`, and `range = help × width`, except the last symbol takes `range − help × cf[s]`.
+- **Model.** 257 symbols (256 byte values plus an end symbol real streams never use), total 4096.
+  - Start: each symbol gets `floor(4096 / 257)` = 15, and the first `4096 mod 257` = 241 symbols get one more. Then a rebuild runs.
+  - A rebuild first doubles the batch length (starting from `(257 >> 4) | 2` = 18, capped at 2000). It then sets the bands `cf` from the counts, halves every count (`(c >> 1) | 1`), and spreads the freed total as an increment `floor(missing / batch)`.
+  - The remainder `missing mod batch` is handled by giving the last `remainder` updates of the batch one extra.
+  - Each counted symbol adds the increment to its count, and the bands only change at the next rebuild.
+- **Payload.** One lead symbol (0 in every stream seen; decoded but not counted), then each coefficient as a little-endian int16, low byte then high byte, both counted.
+- **Trailer.** The last 3 bytes are the payload length, big-endian. The decoder's read-ahead reaches into them, which is harmless.
+
+Because the starting bands of bytes 0–240 are exactly 16/4096 wide, the first bytes of a stream decode as if they were plain bytes. That made the format look like raw values followed by something else.
 
 ## Reconstruction
 

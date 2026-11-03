@@ -6,7 +6,8 @@
 //   streams, band-major; level 0 has LL, LH, HL, HH per band,
 //   other levels LH, HL, HH per band.
 // Each stream starts with a mode byte. Decoded: 5 = empty (exactly
-// 1 byte), 2 = Huffman-coded run-length symbols, 6 = run-length words.
+// 1 byte), 2 = Huffman-coded run-length symbols, 3 = range-coded
+// bytes, 6 = run-length words.
 // Any other mode raises UNSUPPORTED_MODE.
 // ⚠️ Stream counts bands x 4 / bands x 3 are only proven for 3-band
 // files so far.
@@ -15,11 +16,11 @@
 import { EcwError, ERROR_CODES, SAMPLE_REQUEST } from "../errors.js";
 
 /** Stream modes the library decodes. */
-export var STREAM_MODE = Object.freeze({ EMPTY: 5, CODED_A: 2, CODED_B: 6 });
+export var STREAM_MODE = Object.freeze({ EMPTY: 5, CODED_A: 2, CODED_B: 6, RANGE_CODED: 3 });
 
 /** @returns {boolean} true if the library decodes stream mode m */
 export function isSupportedMode(m) {
-	return m === STREAM_MODE.EMPTY || m === STREAM_MODE.CODED_A || m === STREAM_MODE.CODED_B;
+	return m === STREAM_MODE.EMPTY || m === STREAM_MODE.CODED_A || m === STREAM_MODE.CODED_B || m === STREAM_MODE.RANGE_CODED;
 }
 
 /**

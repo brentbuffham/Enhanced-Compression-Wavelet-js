@@ -7,7 +7,7 @@ A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, p
 - Working: `openEcw` reads the header, georeferencing and levels; `readRegion` decodes imagery at any resolution; `readRegionToScratch` streams outputs too big for memory into OPFS.
 - Accuracy: matches the ECW SDK (via GDAL) bit for bit on three independent test files, at full resolution and at every overview level.
 - Also: a ready-made module Worker (`ecw-js/worker`).
-- Stream modes decoded: 2, 5 and 6, each worked out from the bytes of real files. A file using any other mode raises `UNSUPPORTED_MODE` (see [Errors](#errors)).
+- Stream modes decoded: 2, 3, 5 and 6, each worked out from the bytes of real files. A file using any other mode raises `UNSUPPORTED_MODE` (see [Errors](#errors)).
 - Not yet: writing ECW.
 - Built clean-room: no ECW SDK source code was used. See [Clean-room build](#clean-room-build).
 

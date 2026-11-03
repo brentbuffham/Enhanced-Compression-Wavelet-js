@@ -98,7 +98,32 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Example (9 nodes): tree `. +1 . z62 . . z3585 z319 −1`, data `2b ef 32 00` → `z319 +1 z62 +1 0 z62 0 +1 z62 +1 z3585`: a short vertical line of coefficients at columns 62–63, rows 4–7.
 - Ruled out on the way: u32 table length (the first two `00` after `N` are tree nodes); bit-packed trees; reading short tokens as all-values or `5v` as runs.
 
-## 🔍 OPEN: mode 3 streams (not decoded yet)
+## ⭐ CRACKED: mode 3 streams (range-coded bytes)
+
+- **What it is:** an off-the-shelf adaptive range coder, not a custom scheme.
+  - Coder: Schindler-style carry-handling range coder (31-bit range, 7 extra bits, mode byte as the header byte).
+  - Model: his quasistatic frequency model, configured like his example compressor: 257 symbols (256 bytes + an end symbol), total 4096, uniform start, rebuild batches doubling from 36 to a target of 2000.
+  - Payload: one lead symbol (0, decoded but not counted), then the coefficients as little-endian int16 (low, high).
+  - Trailer: a 3-byte big-endian payload length.
+  - Spec in `docs/ECW_FORMAT_SPEC.md` ("Mode 3"), code in `src/codec/rangeCoded.js`.
+- **How it was established.**
+  - The SDK decoder oracle (`mode3Oracle.mjs`) measured the first rebuilt table through the SDK's own band edges: byte 0's band ends at 14,671/65,536, and byte 5's band starts at 3,413.5/14,671 inside it (PINK and BLUE).
+  - Those two edges were matched against the published quasistatic model: Dario Phong's write-up of Schindler's code, Hugi 18, "Quasi Static model". That is general compression literature, read with Brent's approval; no ECW source.
+  - With 257 symbols at total 4096 and the lead not counted, byte 0's band = 9 + 10×50 + 8×51 = 917/4096 (the 14,671 edge), and byte 5's band starts at 917 + 4×9 = 953/4096 (the 3,413.5 edge). The rest of the table is the unseen bytes at 9/4096 each, the "escape ramp" of slope 32 that the sweep showed.
+  - Schindler's 31-bit decoder with this model decodes all 31 ground-truth streams, and the result matches everywhere except about a dozen isolated ±2 edge-row values and two all-zero truth planes (both solver limits). All 137 real streams decode to exactly their coefficient count. None uses the end symbol, every lead is 0, every trailer equals the payload length, and the decoder's read-ahead stops 1–2 bytes before the end.
+  - The library decoder matches the scratch decoder on all 137 streams (9 ms in total).
+  - GDAL pixel parity on sample D (PINK, library reads with skip off against gdal_translate): bit-exact, 0 differing pixels, at levels 1–7. That covers the whole image at levels 1–4 (block 83's level 2), the bottom-right corner, and the bottom edge at levels 5–7 (the mode-3 blocks are at level 6).
+  - Open on sample D, not mode 3 (the image centre shows the same, and 0.4.0 has it too):
+    - levels 8–10 are ±5 off everywhere (about 90% of pixels, all three channels together, so likely luma; check this sample's quantisation steps for the finest records);
+    - a reduced read whose y isn't a multiple of the scale is one row off GDAL's nearest-neighbour phase;
+    - reads with unequal x/y scales don't match;
+    - level 0 is off (max 119).
+- **Why it took so long (the lesson).**
+  - The uniform start gives bytes 0–240 a width of exactly 16/4096, so the opening bytes look like raw values. Bytes 241–256 are 15/4096 wide.
+  - A flat 1/256 reader sees those narrower bands as a "sign nibble", a "17-symbol context table" and a "1/16 flag". For example, nibble 15 plus [904,964)/1024 is exactly byte 0xFF's band [4066,4081)/4096.
+  - The "32-bit coder" finding was an artefact of that same wrong model.
+  - The codec suite had been run on the raw bytes, but not with known adaptive *models* layered on a range coder. Checking the published model first would have found it in a day.
+- Everything below is the history of the investigation, kept for the record. Facts below that contradict this summary were artefacts of the flat-reader model.
 
 Source: one private sample (D) whose full census (`modeCensus.mjs`) found 137 mode-3 streams. Streams pulled with `modeStreams.mjs`, along with every other stream of the same blocks.
 

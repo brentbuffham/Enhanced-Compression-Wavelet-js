@@ -1,7 +1,7 @@
 // test/codec/streams.test.js
 //==========================================================
 // Stream decoders: mode 6 (run-length words), mode 2 (Huffman
-// tree + LSB-first codes), mode 5 (empty).
+// tree + LSB-first codes), mode 3 (range-coded bytes), mode 5 (empty).
 // Run with: node --test test/codec/streams.test.js
 //==========================================================
 /* prettier-ignore-file */
@@ -9,6 +9,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { decodeMode6, decodeMode2, decodeStream } from "../../src/codec/streams.js";
 import { encodeMode2 } from "../helpers/encodeMode2.js";
+import { decodeMode3 } from "../../src/codec/rangeCoded.js";
+import { encodeMode3 } from "../helpers/encodeMode3.js";
 import { EcwError } from "../../src/errors.js";
 
 function words(list) {
@@ -93,4 +95,39 @@ test("mode 2: deep trees (300 distinct symbols) decode", function () {
 test("decodeStream rejects a mode it does not decode with UNSUPPORTED_MODE", function () {
 	assert.throws(function () { decodeStream({ mode: 9, bytes: new Uint8Array(4) }, 1); },
 		function (err) { return err instanceof EcwError && err.code === "UNSUPPORTED_MODE" && err.mode === 9 && /mode 9/.test(err.message); });
+});
+
+// Mode 3: range-coded little-endian int16 values under an adaptive byte model.
+// The pinned bytes start like the raw values (lead 00, then 01 00, ff ...) because the
+// model starts nearly flat; the last 3 bytes are the payload length.
+var MODE3_VECTOR = [0x00, 0x01, 0x00, 0xff, 0x0e, 0x64, 0xad, 0x9c, 0x32, 0x87, 0x30, 0xd1, 0xc6, 0x99, 0x21, 0xe1, 0x00, 0x00, 0x13];
+
+test("mode 3: pinned vector decodes to its values", function () {
+	assert.deepEqual(Array.from(decodeMode3(Uint8Array.from(MODE3_VECTOR), 7)), [1, -1, 300, -300, 0, 32767, -32768]);
+	assert.deepEqual(Array.from(encodeMode3([1, -1, 300, -300, 0, 32767, -32768])), MODE3_VECTOR);
+});
+
+function seeded(n, seed, spread) {
+	var out = [], x = seed;
+	for (var i = 0; i < n; i++) { x = (x * 1103515245 + 12345) % 2147483648; var r = x / 2147483648; out.push(r < 0.2 ? 0 : Math.round((r - 0.6) * spread) | 0); }
+	return out;
+}
+
+test("mode 3: round trips through every model rebuild (64x4 and 64x64 blocks)", function () {
+	for (var c of [[256, 1, 120], [256, 7, 3], [4096, 3, 400], [4096, 5, 60000]]) {
+		var values = seeded(c[0], c[1], c[2]).map(function (v) { return Math.max(-32768, Math.min(32767, v)); });
+		assert.deepEqual(Array.from(decodeMode3(encodeMode3(values), values.length)), values);
+	}
+});
+
+test("mode 3: decodeStream dispatches mode 3", function () {
+	assert.deepEqual(Array.from(decodeStream({ mode: 3, bytes: encodeMode3([5, -20, 0, 9]) }, 4)), [5, -20, 0, 9]);
+});
+
+test("mode 3: a wrong length trailer, a non-zero lead or a short stream is BAD_BLOCK", function () {
+	var bytes = encodeMode3([1, 2, 3]);
+	bytes[bytes.length - 1] ^= 1;
+	assert.throws(function () { decodeMode3(bytes, 3); }, { code: "BAD_BLOCK", message: /length trailer/ });
+	assert.throws(function () { decodeMode3(encodeMode3([1, 2, 3], { lead: 7 }), 3); }, { code: "BAD_BLOCK", message: /starts with symbol 7/ });
+	assert.throws(function () { decodeMode3(Uint8Array.from([0, 0, 3]), 1); }, { code: "BAD_BLOCK", message: /too short/ });
 });
