@@ -142,6 +142,15 @@ Source: one private sample (D) whose full census (`modeCensus.mjs`) found 137 mo
   - Context 15's starting table is uniform over 17 symbols at total 1024 (Schindler's quasistatic layout: the first `1024 mod 17` symbols get one extra count). Symbol 15 = literal: a uniform 8-bit byte follows with the coefficient (two's complement).
   - Contexts 0–14 start from a table with 18 symbols: 16 nearly equal symbols, the literal (symbol 16) at [3646, 3871)/4096, and a last symbol exactly as wide as the literal.
   - Every one of the 137 streams codes its first post-prefix coefficient as a literal.
+- Byte matching (2026-11-03): re-encoding the true coefficients with Schindler's encoder (mode byte as its header byte), plus the established structure and static tables, reproduces the real bytes exactly through the first two table uses in almost every stream. The third use is where it breaks (all 31 streams; one breaks at the second), whether that use is context 15 or 0–14. So there is one shared state that changes after two updates. The truth is not the cause: allowing ±3 per coefficient changes nothing.
+- The context 0–14 starting table equals the context 15 table scaled into 15/16 of the range, plus one 1/16 symbol below the literal: 904 × 3.75 + 256 = 3646, 60 × 3.75 = 225. Coding it in two steps (1/16 flag, then the 1024 table) is byte-identical.
+- Ruled out as the update rule:
+  - Schindler's quasistatic rebuild, separate or shared, with any target.
+  - Simple +inc counts, separate or shared, on the literal.
+  - An adaptive nibble model.
+  - An escape symbol followed by a raw value.
+- Single-band fits at the failing use are inconsistent: the literal sometimes shrinks after literals were coded, sometimes grows. So the change involves more than the literal's band.
+- Next: use the SDK as a decoder oracle with crafted mode-3 streams to read the band boundaries and symbol meanings at the third use directly.
 - Open: how the tables update. They don't follow the quasistatic model's batched rebuilds, and they don't follow simple +inc counts. A table can change after one use, and contexts 0–14 appear to share state. Also open: the meaning of the non-literal symbols.
 - Why a wide overview read fails on a block outside its window: tile-cache padding, not a bug. With the cache off, or with 8 px tiles, the same read succeeds. With the default 32 px tiles (or 64 px), each level's window is rounded out to whole tiles. That rounding at two levels, plus the synthesis filter's reach, crosses into the next block row and column of a coarse record. Output pixels are the same either way.
 - Working hypothesis (not confirmed): an adaptive arithmetic/range coder whose models start flat, so the first symbols come out close to raw and the output then becomes dense. The leading `00` and the length trailer would be framing around it.
