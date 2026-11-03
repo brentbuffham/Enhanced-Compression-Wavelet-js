@@ -119,6 +119,16 @@ Source: one private sample (D) whose full census (`modeCensus.mjs`) found 137 mo
   - Rice k 0–8 (both unary polarities), Exp-Golomb k 0–5 and Elias gamma, both bit orders, zigzag or sign-magnitude
 
   None matched more than 1 of 137 streams. Positive controls (the neighbours' real coefficients compressed with deflate, Brotli or zstd) are each picked out uniquely, on every stream. Also not a JPEG QM or JPEG 2000 MQ coder: after 186 `0xFF` bytes, the next byte is `0x00` once (QM always stuffs one) and ≥ `0x90` 86 times (MQ never allows that).
+- ⭐ The coder is Schindler's range coder (1998 public range-coder design; second tier of the codec suite). Evidence:
+  - Its encoder flush ends with the byte count as three big-endian bytes, which is exactly the mode-3 trailer (137/137).
+  - Its `encode_short` (a 16-bit value at flat probability) gives exactly the raw `00 v` prefix.
+  - Decoding the real streams with `schindler()` (`codecs.mjs`: 31-bit low, 7 extra bits, output byte = low >> 23, normalise while range ≤ 2^23), taking payload byte 0 as the first coder byte, returns the raw prefix as 16-bit values: 53, 181 (= `0xB5`, i.e. −75), …
+  - Schindler's encoder writes a header byte `c` before the coder bytes. Here that byte is not in the payload. Plausibly it is the block's mode byte itself (3).
+  - The decoder round-trips a reference encoder in `test/dev/codecs.test.js`.
+- The model on top (open). After the prefix:
+  - The prefix is raw 16-bit values of 8-bit two's-complement coefficients, every positive value plus the first negative one.
+  - The next symbol is uniform over 16 and always equals `min(|v|, 16) − 1` for that first negative v (137/137, read with `culShift(4)`).
+  - The symbol after that lands in one of two narrow bands of the range (about 0.885 and 0.935) whatever v was, so the model from there on is non-uniform and still to be identified.
 - Why a wide overview read fails on a block outside its window: tile-cache padding, not a bug. With the cache off, or with 8 px tiles, the same read succeeds. With the default 32 px tiles (or 64 px), each level's window is rounded out to whole tiles. That rounding at two levels, plus the synthesis filter's reach, crosses into the next block row and column of a coarse record. Output pixels are the same either way.
 - Working hypothesis (not confirmed): an adaptive arithmetic/range coder whose models start flat, so the first symbols come out close to raw and the output then becomes dense. The leading `00` and the length trailer would be framing around it.
 

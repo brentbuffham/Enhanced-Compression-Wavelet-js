@@ -425,3 +425,68 @@ export function universal(src, opt) {
 	}
 	return { values: vals, usedBits: bp };
 }
+
+/**
+ * Schindler's range coder (1998): 31-bit low with a carry byte
+ * buffer, output byte = low >> 23, 7 extra bits, normalised while
+ * range <= 2^23. The encoder's flush ends with the byte count as three
+ * big-endian bytes. Returns a stateful decoder; the model sits on top:
+ *   culFreq(tot) / culShift(bits) -> cumulative count, then
+ *   update(symFreq, lowCum, tot) / updateShift(symFreq, lowCum, bits).
+ * opt.header: the stream starts with a header byte before the first
+ * coder byte (Schindler's start_encoding(c)); default false.
+ */
+export function schindler(src, opt) {
+	var EXTRA = 7, BOTTOM = 1 << 23, p = 0, past = 0;
+	function inbyte() { if (p < src.length) return src[p++]; past++; p++; return 0; }
+	if (opt && opt.header) inbyte();
+	var buffer = inbyte();
+	var low = buffer >>> (8 - EXTRA), range = 1 << EXTRA, help = 0;
+	function normalize() {
+		while (range <= BOTTOM) {
+			low = ((low << 8) | ((buffer << EXTRA) & 0xff)) >>> 0;
+			buffer = inbyte();
+			low = (low | (buffer >>> (8 - EXTRA))) >>> 0;
+			range = (range * 256) >>> 0;
+		}
+	}
+	return {
+		get pos() { return p; },
+		get past() { return past; },
+		culFreq: function (tot) { normalize(); help = Math.floor(range / tot); var t = Math.floor(low / help); return t >= tot ? tot - 1 : t; },
+		culShift: function (bits) { normalize(); help = range >>> bits; var t = Math.floor(low / help); return t >>> bits ? (1 << bits) - 1 : t; },
+		update: function (sf, lt, tot) { var t = help * lt; low = (low - t) >>> 0; if (lt + sf < tot) range = (help * sf) >>> 0; else range = (range - t) >>> 0; },
+		updateShift: function (sf, lt, bits) { this.update(sf, lt, 1 << bits); },
+		short: function () { var v = this.culShift(16); this.updateShift(1, v, 16); return v; },
+		byte: function () { var v = this.culShift(8); this.updateShift(1, v, 8); return v; }
+	};
+}
+
+/** Schindler range encoder (reference for tests and forward checks). */
+export function schindlerEncoder(opt) {
+	var TOP = 0x80000000, SHIFT = 23, BOTTOM = 1 << 23, out = [];
+	var low = 0, range = TOP, buffer = (opt && opt.header) || 0, help = 0, bytecount = 0, wroteHeader = !!(opt && opt.header !== undefined);
+	function outbyte(b) { out.push(b & 0xff); }
+	function normalize() {
+		while (range <= BOTTOM) {
+			if (low < (0xff * BOTTOM)) { outbyte(buffer); for (; help; help--) outbyte(0xff); buffer = (low >>> SHIFT) & 0xff; }
+			else if (low >= TOP) { outbyte(buffer + 1); for (; help; help--) outbyte(0); buffer = (low >>> SHIFT) & 0xff; }
+			else help++;
+			range = (range * 256) >>> 0; low = ((low * 256) % TOP) >>> 0; bytecount++;
+		}
+	}
+	return {
+		freq: function (sf, lt, tot) { normalize(); var r = Math.floor(range / tot), t = r * lt; low = low + t; if (lt + sf < tot) range = r * sf; else range = range - t; },
+		shift: function (sf, lt, bits) { this.freq(sf, lt, 1 << bits); },
+		short: function (v) { this.shift(1, v, 16); },
+		finish: function () {
+			normalize(); bytecount += 5;
+			var t = (low & (BOTTOM - 1)) < ((bytecount & 0xffffff) >>> 1) ? low >>> SHIFT : (low >>> SHIFT) + 1;
+			if (t > 0xff) { outbyte(buffer + 1); for (; help; help--) outbyte(0); }
+			else { outbyte(buffer); for (; help; help--) outbyte(0xff); }
+			outbyte(t & 0xff); outbyte((bytecount >> 16) & 0xff); outbyte((bytecount >> 8) & 0xff); outbyte(bytecount & 0xff);
+			var res = Uint8Array.from(out);
+			return wroteHeader ? res : res;
+		}
+	};
+}

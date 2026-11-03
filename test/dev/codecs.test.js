@@ -148,3 +148,21 @@ test("universal codes: Rice, Exp-Golomb and gamma round trips", function () {
 		});
 	});
 });
+
+test("Schindler range coder: shorts and model symbols round-trip, header byte optional, byte-count trailer", async function () {
+	var { schindler, schindlerEncoder } = await import("../../_dev/ecw-decode/codecs.mjs");
+	var e = schindlerEncoder();
+	var vals = [53, 7, 7, 5, 65535, 0, 12345];
+	vals.forEach(function (v) { e.short(v); });
+	e.freq(3, 10, 40); e.freq(1, 0, 7); e.shift(5, 100, 12);
+	var bytes = e.finish();
+	var L = bytes.length;
+	assert.equal((bytes[L - 3] << 16) | (bytes[L - 2] << 8) | bytes[L - 1], L, "the flush ends with the byte count");
+	[{ src: bytes, opt: { header: true } }, { src: bytes.subarray(1), opt: {} }].forEach(function (c) {
+		var d = schindler(c.src, c.opt);
+		assert.deepEqual(vals.map(function () { return d.short(); }), vals);
+		var a = d.culFreq(40); assert.ok(a >= 10 && a < 13); d.update(3, 10, 40);
+		assert.equal(d.culFreq(7), 0); d.update(1, 0, 7);
+		var s = d.culShift(12); assert.ok(s >= 100 && s < 105); d.updateShift(5, 100, 12);
+	});
+});
