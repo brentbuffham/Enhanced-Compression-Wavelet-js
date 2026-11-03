@@ -34,7 +34,8 @@ var bytes = readFileRange(fs, file, r.start, r.end - r.start);
 var pw = Math.min(header.blockWidth, levels[level].width - col * header.blockWidth);
 var ph = Math.min(header.blockHeight, levels[level].height - row * header.blockHeight);
 console.log("block " + n + "  level " + level + "  row " + row + " col " + col + "  extent " + pw + "x" + ph + "  bytes " + bytes.length);
-splitBlockStreams(bytes, header.bands, level).forEach(function (s, k) {
+// keepUnsupported: dump streams in modes the library does not decode too
+splitBlockStreams(bytes, header.bands, level, { offset: r.start, keepUnsupported: true }).forEach(function (s, k) {
 	console.log("-- stream " + k + "  band " + s.band + " " + s.subband + "  mode " + s.mode + "  payload " + s.bytes.length);
 	if (s.bytes.length) formatHexRows(s.bytes.subarray(0, maxBytes), 0, []).forEach(function (line) { console.log("   " + line); });
 });

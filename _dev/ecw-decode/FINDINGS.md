@@ -98,6 +98,18 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Example (9 nodes): tree `. +1 . z62 . . z3585 z319 −1`, data `2b ef 32 00` → `z319 +1 z62 +1 0 z62 0 +1 z62 +1 z3585`: a short vertical line of coefficients at columns 62–63, rows 4–7.
 - Ruled out on the way: u32 table length (the first two `00` after `N` are tree nodes); bit-packed trees; reading short tokens as all-values or `5v` as runs.
 
+## 🔍 OPEN: mode 3 streams (not decoded yet)
+
+Source: one private sample (D) whose full census (`modeCensus.mjs`) found 137 mode-3 streams. Streams pulled with `modeStreams.mjs`, along with every other stream of the same blocks.
+
+- Where they occur: only band 0 (luma) detail subbands (LH, HL, HH), only in blocks cut short by the level's bottom edge (64×4, 26×4 and 22×13 extents). In those blocks the other band-0 streams are mode 2 (sometimes 6): dense (about 250 of 256 coefficients non-zero), mean |v| ≈ 18, max ≈ 70–120. Mode 2 spends most of its ≈ 500 bytes on the Huffman tree (≈ 100 leaves, mostly 3-byte word leaves). The mode-3 streams for the same kind of content are ≈ 350–365 bytes (≈ 11 bits per coefficient), with no visible table.
+- First payload byte is always `00` (137/137).
+- Last three bytes are a u24 BE equal to the payload length (bytes after the mode byte, trailer included): 137/137. E.g. a 360-byte payload ends `00 01 68`.
+- The body is statistically flat: 1-bits 0.4996, byte entropy 7.996 bits/byte over 46,717 bytes. This points at arithmetic or range coding rather than a prefix code.
+- The first bytes are not flat. Counting u16 LE words from offset 1: 0–6 small words (high byte 00, low byte < 0x40; never a mode-6 sign or run tag), then a word that is either ≥ 0xFE00 (69 streams) or has the form `(15−n)<<12 | (0xE or 0xF)<<8 | 0xF0 | n` (65 streams). Byte-pair examples: `f4 bf`, `fa 5e`, `f9 6e`, `f7 8f`. Three streams fit neither.
+- Why a wide overview read fails on a block outside its window: tile-cache padding, not a bug. With the cache off, or with 8 px tiles, the same read succeeds. With the default 32 px tiles (or 64 px), each level's window is rounded out to whole tiles. That rounding at two levels, plus the synthesis filter's reach, crosses into the next block row and column of a coarse record. Output pixels are the same either way.
+- Working hypothesis (not confirmed): an adaptive arithmetic/range coder whose models start flat, so the first symbols come out close to raw and the output then becomes dense. The leading `00` and the length trailer would be framing around it.
+
 ## ⭐ CRACKED: coefficient layout
 
 - Each stream lists its block's values row by row over the block's extent in its level.
