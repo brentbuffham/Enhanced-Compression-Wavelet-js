@@ -56,7 +56,8 @@ var y0 = Math.max(0, 2 * row * h.blockHeight - M), y1 = Math.min(maxY, 2 * (row 
 var W = x1 - x0, H = y1 - y0;
 console.log("level " + j + " window x " + x0 + ".." + x1 + " y " + y0 + ".." + y1 + " (" + W + "x" + H + "), GDAL scale 1/" + s);
 
-var tif = path.join(path.dirname(path.resolve(outPath)), "gt-" + blockN + "-" + streamK + ".tif");
+// named after the output file, so parallel runs (oracle tags) never share a temp file
+var tif = path.resolve(outPath).replace(/\.json$/i, "") + ".tif";
 var r = spawnSync(path.join(qgisBin, "gdal_translate.exe"), ["-q", "-of", "GTiff", "-co", "COMPRESS=NONE", "-co", "INTERLEAVE=PIXEL",
 	"-srcwin", String(x0 * s), String(y0 * s), String(W * s), String(H * s), "-outsize", String(W), String(H), file, tif], { env: env, encoding: "utf8" });
 if (r.status !== 0) throw new Error("gdal_translate failed: " + r.stderr);
