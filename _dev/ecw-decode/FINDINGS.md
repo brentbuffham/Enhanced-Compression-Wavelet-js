@@ -129,6 +129,20 @@ Source: one private sample (D) whose full census (`modeCensus.mjs`) found 137 mo
   - The prefix is raw 16-bit values of 8-bit two's-complement coefficients, every positive value plus the first negative one.
   - The next symbol is uniform over 16 and always equals `min(|v|, 16) − 1` for that first negative v (137/137, read with `culShift(4)`).
   - The symbol after that lands in one of two narrow bands of the range (about 0.885 and 0.935) whatever v was, so the model from there on is non-uniform and still to be identified.
+- Ground truth (2026-11-03, Brent cleared using the SDK as a black box). `groundTruth.mjs`:
+  - GDAL renders the next image level over a mode-3 block, aligned to level cells.
+  - Luma adds equally to R, G and B, so floor(Y) of every unclamped pixel is known.
+  - Every other coefficient is decoded by ecw-js. Pixels that other undecoded streams can reach are excluded, found by perturbing those streams.
+  - The unknown plane is solved by impulse responses and least squares, then nudged by ±1.
+
+  31 single-stream blocks were solved: most reproduce GDAL exactly, the rest within 1–4 pixels. Values can still be off by 1 where rounding can't tell them apart. Every plane begins with its stream's raw prefix, which confirms raster coefficient order.
+- Mode-3 structure established against that truth (Schindler decoder, payload byte 0 = first coder byte):
+  - While the previous coefficient is ≥ 0 (and at the start): the coefficient is a raw 16-bit value (`encode_short`), holding a signed 8-bit value.
+  - After a negative coefficient v: a uniform 16-way symbol `min(|v|, 16) − 1` (the context nibble), then a symbol from that context's table.
+  - Context 15's starting table is uniform over 17 symbols at total 1024 (Schindler's quasistatic layout: the first `1024 mod 17` symbols get one extra count). Symbol 15 = literal: a uniform 8-bit byte follows with the coefficient (two's complement).
+  - Contexts 0–14 start from a table with 18 symbols: 16 nearly equal symbols, the literal (symbol 16) at [3646, 3871)/4096, and a last symbol exactly as wide as the literal.
+  - Every one of the 137 streams codes its first post-prefix coefficient as a literal.
+- Open: how the tables update. They don't follow the quasistatic model's batched rebuilds, and they don't follow simple +inc counts. A table can change after one use, and contexts 0–14 appear to share state. Also open: the meaning of the non-literal symbols.
 - Why a wide overview read fails on a block outside its window: tile-cache padding, not a bug. With the cache off, or with 8 px tiles, the same read succeeds. With the default 32 px tiles (or 64 px), each level's window is rounded out to whole tiles. That rounding at two levels, plus the synthesis filter's reach, crosses into the next block row and column of a coarse record. Output pixels are the same either way.
 - Working hypothesis (not confirmed): an adaptive arithmetic/range coder whose models start flat, so the first symbols come out close to raw and the output then becomes dense. The leading `00` and the length trailer would be framing around it.
 
