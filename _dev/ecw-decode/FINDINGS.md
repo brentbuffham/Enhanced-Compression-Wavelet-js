@@ -184,6 +184,12 @@ Source: one private sample (D) whose full census (`modeCensus.mjs`) found 137 mo
   - After that point nearly every stream breaks at its next symbol, flat reads included, so the change isn't limited to the 17-symbol table.
   - This counter fits PINK's chains: context 15 changes at the 6th use (prior count 5), context 2 at the 4th use (prior count 6).
   - Ruled out: a total-17 count table (66 vs 239), and scaling every total by 2–256 after the point (stays at 245).
+- After the counter passes 4–5, every read changes, flat ones included, and not by ±1 (PINK, oracle, 32-bit encoder): a +9 then a +7 tail decodes as 0/−97/−179, and a different total at the 6th context-15 use (/1024, /4096, /16384) doesn't recover it. The coder starts on 2^32 exactly: a range start of 0xFFFFFFFF breaks at coefficient 0.
+- All-raw blocks, oracle (BLUE, 2026-11-03):
+  - Raw values decode flat through index 18. Sweeping the position of index 18's low byte (the 37th byte after the lead) gives value = x/256 exactly, so there is no rebuild before it.
+  - The first wrong value is index 19, whatever the prefix values were.
+  - Coding every byte except the lead through a 256-symbol quasistatic model (rebuild interval 18, doubled to 36) makes index 18 come out right for every model precision tried (2^10–2^16), while index 19 stays wrong. Coding the lead through the model too breaks index 18.
+  - So a byte model that rebuilds after 36 byte updates, not counting the lead byte, fits the timing. The rebuilt contents are still unknown.
 - Open: how the tables update. They don't follow the quasistatic model's batched rebuilds, and they don't follow simple +inc counts. A table can change after one use, and contexts 0–14 appear to share state. Also open: the meaning of the non-literal symbols.
 - Why a wide overview read fails on a block outside its window: tile-cache padding, not a bug. With the cache off, or with 8 px tiles, the same read succeeds. With the default 32 px tiles (or 64 px), each level's window is rounded out to whole tiles. That rounding at two levels, plus the synthesis filter's reach, crosses into the next block row and column of a coarse record. Output pixels are the same either way.
 - Working hypothesis (not confirmed): an adaptive arithmetic/range coder whose models start flat, so the first symbols come out close to raw and the output then becomes dense. The leading `00` and the length trailer would be framing around it.
