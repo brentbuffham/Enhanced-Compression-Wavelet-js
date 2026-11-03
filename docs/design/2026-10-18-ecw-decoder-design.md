@@ -36,7 +36,7 @@ Ground truth comes from decoding the same file with QGIS's bundled GDAL (ECW SDK
 
 **v1 out of scope**
 
-- JPEG 2000 (`.jp2`), writing ECW, ECWP network streaming, `.eww` / `.ers` sidecar parsing beyond what the header needs.
+- JPEG 2000 (`.jp2`), writing ECW, ECWP network streaming, `.ers` sidecar parsing beyond what the header needs. (World files and `.prj` sidecars were added later, as optional `openEcw` inputs.)
 
 **Transparency and clipping (opt-in, v1)**
 

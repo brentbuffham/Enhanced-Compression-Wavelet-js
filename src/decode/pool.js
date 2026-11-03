@@ -14,7 +14,7 @@
 // --input-type stripped from Node workers, idle Node workers unref'd.
 //==========================================================
 
-import { EcwError, ERROR_CODES } from "../errors.js";
+import { EcwError, ERROR_CODES, errorFromData } from "../errors.js";
 
 var NODE_WORKER_THREADS = ["node", "worker_threads"].join(":");
 var NODE_OS = ["node", "os"].join(":");
@@ -133,7 +133,7 @@ export async function createDecodePool(n, blob, cache, nodeUrl) {
 		if (!job) return;
 		if (m.progress !== undefined) { if (job.onProgress) job.onProgress(m.progress); return; }
 		finish(w, job);
-		if (m.error) job.reject(new EcwError(m.error.code || ERROR_CODES.WORKER_FAILED, m.error.message, m.error.offset));
+		if (m.error) job.reject(errorFromData(m.error, ERROR_CODES.WORKER_FAILED));
 		else job.resolve(m);
 	}
 
@@ -194,11 +194,12 @@ export async function createDecodePool(n, blob, cache, nodeUrl) {
 		 * @param {{opts:object, oy0:number, oy1:number}} task - opts: readRegion options that survive postMessage.
 		 * @param {function(number)} [onProgress] - The band's share done, 0..1.
 		 * @param {AbortSignal} [signal]
-		 * @returns {Promise<Uint8ClampedArray>} RGBA, outWidth * (oy1 - oy0) * 4 bytes
+		 * @returns {Promise<{data:Uint8ClampedArray, badBlocks:Array}>} data: RGBA, outWidth * (oy1 - oy0) * 4 bytes;
+		 *   badBlocks: blocks read around when opts.onBadBlock is "skip"
 		 */
 		rows: function (i, task, onProgress, signal) {
 			return send(workers[i], { type: "rows", opts: task.opts, oy0: task.oy0, oy1: task.oy1 }, onProgress, signal)
-				.then(function (m) { return new Uint8ClampedArray(m.data); });
+				.then(function (m) { return { data: new Uint8ClampedArray(m.data), badBlocks: m.badBlocks || [] }; });
 		},
 		/** Terminate every worker; queued and running tasks reject ABORTED. Safe to call more than once. */
 		close: function () {

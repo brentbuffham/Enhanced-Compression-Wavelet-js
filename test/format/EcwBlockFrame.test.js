@@ -7,7 +7,7 @@
 /* prettier-ignore-file */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { splitBlockStreams, streamCount, STREAM_MODE } from "../../src/format/EcwBlockFrame.js";
+import { splitBlockStreams, streamCount, STREAM_MODE, isSupportedMode } from "../../src/format/EcwBlockFrame.js";
 
 // streams: [[mode, ...payload], ...]
 function buildBlock(streams) {
@@ -85,10 +85,28 @@ test("zero-length stream throws at its start", function () {
 	assert.throws(function () { splitBlockStreams(block, 3, 1); }, { code: "BAD_BLOCK", offset: 32 + 1 });
 });
 
-test("unknown mode byte throws at the stream start", function () {
+test("a mode the library doesn't decode throws UNSUPPORTED_MODE at the stream start, asking for a sample", function () {
 	var streams = emptyStreams(9);
 	streams[2] = [9];
-	assert.throws(function () { splitBlockStreams(buildBlock(streams), 3, 1); }, { code: "BAD_BLOCK", offset: 32 + 2 });
+	assert.throws(function () { splitBlockStreams(buildBlock(streams), 3, 1); },
+		{ code: "UNSUPPORTED_MODE", offset: 32 + 2, mode: 9, message: /stream 2 uses stream mode 9, which ecw-js does not decode yet. .*blastingapps.com/ });
+});
+
+test("keepUnsupported returns the stream with its mode instead", function () {
+	var streams = emptyStreams(9);
+	streams[2] = [9, 1, 2];
+	var out = splitBlockStreams(buildBlock(streams), 3, 1, { keepUnsupported: true });
+	assert.equal(out[2].mode, 9);
+	assert.deepEqual(Array.from(out[2].bytes), [1, 2]);
+	assert.equal(isSupportedMode(9), false);
+	assert.equal(isSupportedMode(2) && isSupportedMode(5) && isSupportedMode(6), true);
+});
+
+test("offset option turns error offsets into file offsets", function () {
+	var streams = emptyStreams(9);
+	streams[2] = [9];
+	assert.throws(function () { splitBlockStreams(buildBlock(streams), 3, 1, { offset: 0x1000 }); }, { code: "UNSUPPORTED_MODE", offset: 0x1000 + 32 + 2 });
+	assert.throws(function () { splitBlockStreams(new Uint8Array(10), 3, 0, { offset: 0x1000 }); }, { code: "BAD_BLOCK", offset: 0x1000 + 44 });
 });
 
 test("empty-mode stream longer than one byte throws", function () {

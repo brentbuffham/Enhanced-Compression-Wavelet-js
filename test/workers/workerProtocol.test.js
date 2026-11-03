@@ -149,3 +149,14 @@ test("the worker entry imports cleanly outside a Worker and is exported as ecw-j
 	var pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
 	assert.equal(pkg.exports["./worker"], "./src/workers/ecwDecodeWorker.js");
 });
+
+test("open passes the sidecar options through to openEcw", async function () {
+	var h = harness();
+	var out = await h.send("open", { blob: file(), worldFile: "2\n0\n0\n-2\n11\n19\n", prj: "LOCAL_CS[\"Grid\",UNIT[\"metre\",1]]", georef: "worldFile" });
+	assert.equal(out.msg.type, "result");
+	assert.equal(out.msg.result.georefSource, "worldFile");
+	assert.equal(out.msg.result.originX, 10);
+	assert.equal(out.msg.result.originY, 20);
+	assert.equal(out.msg.result.crs.name, "Grid");
+	assert.equal(out.msg.result.units, "metre");
+});

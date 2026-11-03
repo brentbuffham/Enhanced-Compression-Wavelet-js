@@ -7,6 +7,7 @@ A JavaScript reader for ERDAS ECW (Enhanced Compression Wavelet) raster files, p
 - Working: `openEcw` reads the header, georeferencing and levels; `readRegion` decodes imagery at any resolution; `readRegionToScratch` streams outputs too big for memory into OPFS.
 - Accuracy: matches the ECW SDK (via GDAL) bit for bit on three independent test files, at full resolution and at every overview level.
 - Also: a ready-made module Worker (`ecw-js/worker`).
+- Stream modes decoded: 2, 5 and 6, each worked out from the bytes of real files. A file using any other mode raises `UNSUPPORTED_MODE` (see [Errors](#errors)).
 - Not yet: writing ECW.
 - Built clean-room: no ECW SDK source code was used. See [Clean-room build](#clean-room-build).
 
@@ -61,6 +62,27 @@ ecw.info;
 
 `pixelWindowToBounds(ecw.info, x, y, width, height)` turns a pixel window into map-coordinate bounds.
 
+### World file and .prj sidecars
+
+The header only names the datum and projection (`GDA94`, `UTM55`, ...) and leaves `units` as `null`. If the ECW came with a world file (`.eww`, `.ecww` or `.wld`) and a `.prj`, pass them in as text or as Files:
+
+```js
+import { openEcw, pickSidecars } from "ecw-js";
+
+var { worldFile, prj } = pickSidecars(ecwFile, droppedFiles); // matches site.ecw to site.eww / site.prj
+var ecw = await openEcw(ecwFile, { worldFile, prj });
+
+ecw.info.crs;          // { wkt, type, name, datum, projection, units, unitFactor, epsg } from the .prj
+ecw.info.units;        // the .prj's linear unit, e.g. "Meter"
+ecw.info.worldFile;    // { cellSizeX, cellSizeY, rotationX, rotationY, centreX, centreY, originX, originY }
+ecw.info.warnings;     // where the world file disagrees with the header
+ecw.info.georefSource; // "header"
+```
+
+The header stays the source of `originX`, `originY` and the cell sizes. A world file gives the centre of the top-left pixel, so its `originX` / `originY` (the corner) sit half a cell from `centreX` / `centreY`. When the two sources differ by more than a thousandth of a cell, `warnings` says by how much. Pass `georef: "worldFile"` to use the world file's georeferencing instead. Rotated world files aren't supported there.
+
+`epsg` is filled in only when the WKT carries an EPSG authority. ESRI-style `.prj` files usually don't, and no names are mapped to codes. `parseWorldFile(text)` and `parsePrj(text)` are exported for use on their own.
+
 ## Reading pixels
 
 ```js
@@ -79,12 +101,28 @@ var img = await ecw.readRegion({
 	transparentBelow: 8,                     // optional: near-black becomes transparent (3 clears the flat background, 8 also the smeared footprint edge)
 	transparentAbove: 250,                   // optional: near-white becomes transparent
 	transparentColor: { color: "#3a5f2b", below: 6, above: 6 }, // optional: a colour ± tolerance (or a list of them)
-	clipPolygon: [[[x1, y1], [x2, y2], [x3, y3]]] // optional: map-coordinate rings
+	clipPolygon: [[[x1, y1], [x2, y2], [x3, y3]]], // optional: map-coordinate rings
+	onBadBlock: "skip"                       // optional: read around blocks that can't be decoded (default "throw")
 });
-// { data: Uint8ClampedArray (RGBA), width, height, level, bounds: { minX, minY, maxX, maxY } }
+// { data: Uint8ClampedArray (RGBA), width, height, level, bounds: { minX, minY, maxX, maxY },
+//   badBlocks }  // only with onBadBlock: "skip"
 
 await ecw.close(); // also deletes this reader's scratch files
 ```
+
+### Blocks that can't be decoded
+
+By default a read stops at the first block it can't decode. It raises `BAD_BLOCK` for a damaged block, or `UNSUPPORTED_MODE` for a stream in a mode ecw-js doesn't decode yet. The error says which block it was (see [Errors](#errors)).
+
+With `onBadBlock: "skip"`, the read carries on. Each stream that can't be decoded is read as empty, which means no detail from it, and a block whose stream table is broken is read with all its streams empty. The area renders softer rather than blank, and `badBlocks` lists what was skipped:
+
+```js
+img.badBlocks;
+// [{ block, level, row, col, offset, code, mode?, message,
+//    streams: [{ band, subband, mode, code }] }]   // streams is [] when the whole block was skipped
+```
+
+Show the user when `badBlocks` isn't empty: the picture isn't complete. Tiles built around skipped blocks are never cached, so a later read without `"skip"` still raises the error. `readRegionToScratch` takes the same option and returns `badBlocks` too.
 
 ## Showing it on screen
 
@@ -182,7 +220,7 @@ A Worker holds one file at a time. Sending `open` or `close` aborts the reads st
 
 ## Errors
 
-Everything throws or rejects with an `EcwError`. Branch on `error.code`; `error.offset` is the byte offset where the problem was found, when there is one.
+Everything throws or rejects with an `EcwError`. Branch on `error.code`; `error.offset` is the file offset where the problem was found, when there is one. An error from one block also has `error.block`: `{ number, level, row, col, offset }`, where `level` is the level-record index (0 = coarsest) and `offset` is the block's file offset. The message starts with the same location.
 
 | Code | Meaning |
 |---|---|
@@ -191,11 +229,12 @@ Everything throws or rejects with an `EcwError`. Branch on `error.code`; `error.
 | `TRUNCATED` | The file ends before the data it describes |
 | `BAD_LEVEL_TABLE` | The resolution-level table is inconsistent |
 | `BAD_BLOCK_INDEX` | The block index is inconsistent (wrong length, falling offsets, wrong entry count) |
-| `BAD_BLOCK` | A block's internal stream table is inconsistent |
+| `BAD_BLOCK` | A block is damaged: its stream table is inconsistent, or a stream doesn't decode to the block's size |
+| `UNSUPPORTED_MODE` | A stream uses a mode ecw-js doesn't decode yet. `error.mode` is the mode byte read. The file isn't necessarily damaged. The message asks for an ECW that uses the mode, sent to blastingapps.com, so it can be added clean-room. |
 | `INVALID_ARGUMENT` | A bad argument, such as a non-Blob or a reversed range, or a read on a closed reader |
 | `OUTPUT_TOO_LARGE` | A region read would exceed the in-memory limit |
 | `ABORTED` | The read was cancelled with an `AbortSignal` |
-| `NOT_IMPLEMENTED` | Reserved for features that aren't available yet. This version doesn't raise it. |
+| `NOT_IMPLEMENTED` | A feature that isn't available yet: currently only `georef: "worldFile"` with a rotated world file |
 | `WORKER_FAILED` | A decode worker stopped in the middle of a read; later reads run on this thread |
 
 ## Scope

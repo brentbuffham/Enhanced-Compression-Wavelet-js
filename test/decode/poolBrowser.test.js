@@ -47,7 +47,8 @@ test("browser path: module Workers from the pool's own URL decode the same bytes
 		assert.equal(made.length, 2);
 		var direct = await openEcw(blob, { cache: false, threads: 1 });
 		var band = await pool.rows(1, { opts: OPTS, oy0: 10, oy1: 30 });
-		assert.deepEqual(Array.from(band), Array.from(await direct._decodeRows(direct._plan(OPTS), 10, 30, function () {})));
+		assert.deepEqual(Array.from(band.data), Array.from((await direct._decodeRows(direct._plan(OPTS), 10, 30, function () {})).data));
+		assert.ok(band.data.length > 0);
 		pool.close();
 		assert.ok(made.every(function (w) { return w.terminated; }));
 	});
@@ -79,7 +80,7 @@ test("a task that can't be posted fails alone and the worker stays free", async 
 		var pool = await createDecodePool(1, file(), false);
 		await assert.rejects(pool.rows(0, { opts: { x: 0, y: 0, width: 64, height: 48, notCloneable: function () {} }, oy0: 0, oy1: 2 }), { code: "WORKER_FAILED" });
 		assert.equal(pool.broken, false);
-		assert.equal((await pool.rows(0, { opts: OPTS, oy0: 0, oy1: 2 })).length, 64 * 2 * 4);
+		assert.equal((await pool.rows(0, { opts: OPTS, oy0: 0, oy1: 2 })).data.length, 64 * 2 * 4);
 		pool.close();
 	});
 });

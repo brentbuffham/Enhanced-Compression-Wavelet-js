@@ -90,7 +90,7 @@ test("mode 2: deep trees (300 distinct symbols) decode", function () {
 	assert.equal(out[299], 300);
 });
 
-test("decodeStream rejects a mode it does not know", function () {
+test("decodeStream rejects a mode it does not decode with UNSUPPORTED_MODE", function () {
 	assert.throws(function () { decodeStream({ mode: 9, bytes: new Uint8Array(4) }, 1); },
-		function (err) { return err instanceof EcwError && err.code === "BAD_BLOCK" && /mode 9/.test(err.message); });
+		function (err) { return err instanceof EcwError && err.code === "UNSUPPORTED_MODE" && err.mode === 9 && /mode 9/.test(err.message); });
 });

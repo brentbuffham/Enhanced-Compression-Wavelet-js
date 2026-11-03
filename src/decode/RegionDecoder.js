@@ -20,7 +20,7 @@
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
-import { splitBlockStreams, STREAM_MODE } from "../format/EcwBlockFrame.js";
+import { splitBlockStreams, emptyBlockStreams, isSupportedMode, unsupportedModeError, STREAM_MODE } from "../format/EcwBlockFrame.js";
 import { decodeStream } from "../codec/streams.js";
 import { synthesizeWindow, requiredCoefficientWindow } from "../codec/wavelet.js";
 
@@ -28,7 +28,12 @@ import { synthesizeWindow, requiredCoefficientWindow } from "../codec/wavelet.js
  * @param {{header:object, levels:Array, index:object, grid:Array,
  *   fetchBlock?:function(number): Promise<Uint8Array>,
  *   fetchBlocks?:function(number, number): Promise<Uint8Array[]>, signal?:AbortSignal,
- *   onBlock?:function(number), tileCache?:object}} o
+ *   onBlock?:function(number), tileCache?:object, onBadBlock?:"throw"|"skip",
+ *   blockOffset?:function(number): Promise<number>}} o
+ *   onBadBlock "skip": a stream that can't be decoded (BAD_BLOCK or UNSUPPORTED_MODE)
+ *   is read as empty, and a block that can't be framed as all-empty; each is listed
+ *   by finishBadBlocks(). Default "throw". blockOffset(n) gives block n's file offset,
+ *   for error locations (only asked on failures).
  *   tileCache (BlockCache): { tileSize, get(j, tx, ty) -> Promise<tile|null>,
  *   put(j, tx, ty, tile) -> Promise, putEighths?(j, tx, ty, width, height, Int16 planes) -> Promise,
  *   keepsLevel?(pixels, bands) -> boolean (false: the requested level isn't cached) }
@@ -49,6 +54,12 @@ export function createDecodeContext(o) {
 		signal: o.signal,
 		onBlock: o.onBlock,
 		tileCache: o.tileCache || null,
+		skipBad: o.onBadBlock === "skip",
+		blockOffset: o.blockOffset || null,
+		// skip mode: block number -> bad-block record
+		bad: new Map(),
+		// times a skipped block fed a synthesis (tiles built from one aren't cached)
+		badUsed: 0,
 		blocks: new Map(),
 		fetched: 0
 	};
@@ -95,15 +106,63 @@ async function loadBlockRow(ctx, record, row, c0, c1) {
 	}
 }
 
+// Errors skip mode reads around; anything else (I/O, abort) still throws
+function isBlockFailure(err) {
+	return err && (err.code === ERROR_CODES.BAD_BLOCK || err.code === ERROR_CODES.UNSUPPORTED_MODE);
+}
+
+// Tag an error with the block it came from; locateBlockError adds the file offset
+function tagBlock(err, at, relative) {
+	if (err && typeof err === "object" && !err._blockAt) { err._blockAt = at; err._relative = relative; }
+	return err;
+}
+
+function plainMessage(err) {
+	return String(err && err.message ? err.message : err).replace(/ \(at 0x[0-9a-f]+\)$/, "");
+}
+
+// Skip mode: list a block (or one of its streams) that couldn't be decoded
+function noteBad(ctx, at, err, stream) {
+	var r = ctx.bad.get(at.n);
+	if (!r) {
+		r = { block: at.n, level: at.record, row: at.row, col: at.col, offset: null, code: err.code, message: plainMessage(err), streams: [] };
+		ctx.bad.set(at.n, r);
+	}
+	if (typeof err.mode === "number" && r.mode === undefined) r.mode = err.mode;
+	if (stream) r.streams.push({ band: stream.band, subband: stream.subband, mode: stream.mode, code: err.code });
+}
+
+var KEEP_UNSUPPORTED = { keepUnsupported: true };
+
 // Frame one fetched block and memoise it
 function addBlock(ctx, record, row, col, bytes) {
 	var h = ctx.header;
 	var lv = ctx.levels[record];
 	var n = ctx.grid[record].firstBlock + row * ctx.grid[record].cols + col;
+	var at = { n: n, record: record, row: row, col: col };
 	ctx.fetched++;
 	if (ctx.onBlock) ctx.onBlock(ctx.fetched);
-	var streams = splitBlockStreams(bytes, h.bands, record);
+	var streams, bad = false;
+	try {
+		streams = splitBlockStreams(bytes, h.bands, record, ctx.skipBad ? KEEP_UNSUPPORTED : undefined);
+	} catch (err) {
+		if (!ctx.skipBad || !isBlockFailure(err)) throw tagBlock(err, at, true);
+		noteBad(ctx, at, err, null);
+		streams = emptyBlockStreams(h.bands, record);
+		bad = true;
+	}
+	if (ctx.skipBad && !bad) {
+		for (var k = 0; k < streams.length; k++) {
+			var st = streams[k];
+			if (isSupportedMode(st.mode)) continue;
+			noteBad(ctx, at, unsupportedModeError(st.mode, "stream " + k), st);
+			streams[k] = { band: st.band, subband: st.subband, mode: STREAM_MODE.EMPTY, bytes: new Uint8Array(0) };
+			bad = true;
+		}
+	}
 	var entry = {
+		at: at,
+		bad: bad,
 		pw: Math.min(h.blockWidth, lv.width - col * h.blockWidth),
 		ph: Math.min(h.blockHeight, lv.height - row * h.blockHeight),
 		streams: streams,
@@ -119,13 +178,63 @@ function addBlock(ctx, record, row, col, bytes) {
 	return entry;
 }
 
-function blockPlane(entry, band, subband) {
+function blockPlane(ctx, entry, band, subband) {
 	var key = band + subband;
 	if (!entry.decoded[key]) {
 		var stream = entry.streams.find(function (s) { return s.band === band && s.subband === subband; });
-		entry.decoded[key] = decodeStream(stream, entry.pw * entry.ph);
+		try {
+			entry.decoded[key] = decodeStream(stream, entry.pw * entry.ph);
+		} catch (err) {
+			if (!ctx.skipBad || !isBlockFailure(err)) throw tagBlock(err, entry.at, false);
+			// a stream that won't decode reads as zeros
+			noteBad(ctx, entry.at, err, stream);
+			entry.bad = true;
+			entry.decoded[key] = new Int32Array(entry.pw * entry.ph);
+		}
 	}
 	return entry.decoded[key];
+}
+
+/**
+ * Give an error raised from a block its location: err.block = { number, level,
+ * row, col, offset } (offset = the block's file offset), the location in the
+ * message, and err.offset as a file offset. Other errors come back unchanged.
+ * @returns {Promise<Error>}
+ */
+export async function locateBlockError(ctx, err) {
+	var at = err && err._blockAt;
+	if (!at) return err;
+	var blockOffset = await safeBlockOffset(ctx, at.n);
+	var offset;
+	if (typeof err.offset !== "number") offset = blockOffset;
+	else if (!err._relative) offset = err.offset;
+	else if (blockOffset !== undefined) offset = blockOffset + err.offset;
+	var e = new EcwError(err.code, "block " + at.n + " (level " + at.record + ", row " + at.row + ", col " + at.col + "): " + plainMessage(err), offset);
+	e.block = { number: at.n, level: at.record, row: at.row, col: at.col, offset: blockOffset === undefined ? null : blockOffset };
+	if (typeof err.mode === "number") e.mode = err.mode;
+	return e;
+}
+
+async function safeBlockOffset(ctx, n) {
+	if (!ctx.blockOffset) return undefined;
+	try { return await ctx.blockOffset(n); } catch (e) { return undefined; }
+}
+
+/**
+ * Skip mode: the blocks read around so far, with file offsets, in block order.
+ * @returns {Promise<Array<{block:number, level:number, row:number, col:number, offset:number|null,
+ *   code:string, mode?:number, message:string, streams:Array<{band:number, subband:string, mode:number, code:string}>}>>}
+ *   streams is empty when the whole block couldn't be framed.
+ */
+export async function finishBadBlocks(ctx) {
+	var list = Array.from(ctx.bad.values()).sort(function (a, b) { return a.block - b.block; });
+	for (var i = 0; i < list.length; i++) {
+		if (list[i].offset === null) {
+			var off = await safeBlockOffset(ctx, list[i].block);
+			if (off !== undefined) list[i].offset = off;
+		}
+	}
+	return list;
 }
 
 // Coefficients of `subbands` for record r over [x0, x1) x [y0, y1): result[band][subband] Float32Array
@@ -147,7 +256,7 @@ async function readCoefficients(ctx, record, subbands, x0, y0, x1, y1) {
 			var sy0 = Math.max(y0, oy), sy1 = Math.min(y1, oy + entry.ph);
 			for (var bnd = 0; bnd < h.bands; bnd++) {
 				for (var s = 0; s < subbands.length; s++) {
-					var src = blockPlane(entry, bnd, subbands[s]);
+					var src = blockPlane(ctx, entry, bnd, subbands[s]);
 					var dst = out[bnd][subbands[s]];
 					for (var y = sy0; y < sy1; y++) {
 						var si = (y - oy) * entry.pw - ox;
@@ -158,6 +267,7 @@ async function readCoefficients(ctx, record, subbands, x0, y0, x1, y1) {
 					}
 				}
 			}
+			if (entry.bad) ctx.badUsed++;
 		}
 	}
 	return out;
@@ -284,9 +394,12 @@ async function assembleTiles(ctx, j, size, x0, y0, x1, y1) {
 		var rc = rects[r];
 		var bx0 = (tx0 + rc.c0) * t, by0 = (ty0 + rc.r0) * t;
 		var bx1 = Math.min(size.width, (tx0 + rc.c1 + 1) * t), by1 = Math.min(size.height, (ty0 + rc.r1 + 1) * t);
+		var badBefore = ctx.badUsed;
 		var box = { width: bx1 - bx0, height: by1 - by0, scale: 1, bands: await synthesizeLevel(ctx, j, bx0, by0, bx1, by1) };
 		storeIntermediate(box.bands);
-		for (ty = ty0 + rc.r0; ty <= ty0 + rc.r1; ty++) {
+		// tiles built around skipped blocks stay out of the cache: a later read
+		// without skip mode must still see the failure
+		for (ty = ty0 + rc.r0; ctx.badUsed === badBefore && ty <= ty0 + rc.r1; ty++) {
 			for (tx = tx0 + rc.c0; tx <= tx0 + rc.c1; tx++) {
 				var px0 = tx * t, py0 = ty * t, pw = Math.min(size.width, px0 + t) - px0, ph = Math.min(size.height, py0 + t) - py0;
 				// the usual case: eighths that fit Int16, written straight from the box

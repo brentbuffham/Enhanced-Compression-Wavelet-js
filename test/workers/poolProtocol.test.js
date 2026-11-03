@@ -41,7 +41,8 @@ test("open, then rows answers a band's RGBA, transferred, equal to the reader's 
 	assert.deepEqual(res.transfer, [res.msg.data]);
 	var direct = await openEcw(blob, { cache: false, threads: 1 });
 	var want = await direct._decodeRows(direct._plan(OPTS), 5, 17, function () {});
-	assert.deepEqual(Array.from(new Uint8ClampedArray(res.msg.data)), Array.from(want));
+	assert.deepEqual(Array.from(new Uint8ClampedArray(res.msg.data)), Array.from(want.data));
+	assert.deepEqual(res.msg.badBlocks, []);
 	var progress = h.messages.filter(function (m) { return m.msg.id === 2 && m.msg.progress !== undefined; });
 	assert.ok(progress.length >= 1);
 	progress.forEach(function (m) { assert.ok(m.msg.progress >= 0 && m.msg.progress <= 1); });

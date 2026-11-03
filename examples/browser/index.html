@@ -16,12 +16,15 @@
 		<label class="toggle hidden" id="vividLabel" title="Show raw colour values on this wide-gamut screen, like QGIS. Off: colour-managed sRGB.">
 			<input type="checkbox" id="vividToggle"> Vivid colour
 		</label>
+		<label class="toggle" title="readRegion({ onBadBlock: 'skip' }): read around blocks that can't be decoded (a stream mode ecw-js doesn't decode yet, or a damaged block) and list them, instead of stopping">
+			<input type="checkbox" id="skipToggle"> Skip bad blocks
+		</label>
 		<label class="toggle" title="openEcw(file, { threads }): workers that decode big reads in parallel. Changing it reopens the file.">
 			Threads <select id="threadsSelect"><option value="0" selected>auto</option><option value="1">1</option><option value="2">2</option><option value="4">4</option><option value="8">8</option></select>
 		</label>
 		<label class="button">
 			Open file
-			<input type="file" id="fileInput" accept=".ecw" hidden>
+			<input type="file" id="fileInput" accept=".ecw,.eww,.ecww,.wld,.prj" multiple hidden>
 		</label>
 		<button class="icon-button" id="togglePanel" title="Show or hide the side panel" aria-label="Toggle panel">☰</button>
 	</header>
@@ -31,6 +34,7 @@
 			<canvas id="viewer"></canvas>
 			<div class="viewer-empty" id="viewerEmpty">
 				<p><strong>Drop an ECW file here</strong></p>
+				<p class="muted">Drop its .eww (or .wld) and .prj with it to read those too.</p>
 				<p class="muted">Your file never leaves your browser. Everything is read locally, in a Worker.</p>
 			</div>
 			<div class="viewer-hud" id="hud"></div>

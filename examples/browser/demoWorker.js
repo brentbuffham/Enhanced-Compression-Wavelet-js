@@ -5,11 +5,12 @@
 // In:  { id, type: "open" | "levelBlocks" | "inspect" | "sample" | "keep" | "read", payload }
 // Out: { id, type: "progress", fraction, label }
 //      { id, type: "result", result }   (typed arrays transferred)
-//      { id, type: "error", code, message }
+//      { id, type: "error", code, message, offset?, block?, mode? }
 //==========================================================
 
 import { openFile, readLevelBlockSizes, inspectBlock, sampleModes, keepFile } from "./lib/demoCore.js";
 import { openEcw } from "../../src/index.js";
+import { errorToData } from "../../src/errors.js";
 
 var state = null;
 
@@ -38,7 +39,7 @@ var handlers = {
 	},
 	read: async function (payload, onProgress) {
 		var img = await state.reader.readRegion(Object.assign({}, payload, { onProgress: onProgress }));
-		return { data: img.data, width: img.width, height: img.height, level: img.level, bounds: img.bounds, cache: state.reader.cacheStats() };
+		return { data: img.data, width: img.width, height: img.height, level: img.level, bounds: img.bounds, cache: state.reader.cacheStats(), badBlocks: img.badBlocks };
 	},
 	keep: function (payload, onProgress) {
 		return keepFile(state.file, payload.name, onProgress);
@@ -57,6 +58,6 @@ self.onmessage = async function (event) {
 		var transfer = result && result.sizes ? [result.sizes.buffer] : result && result.data ? [result.data.buffer] : [];
 		self.postMessage({ id: msg.id, type: "result", result: result }, transfer);
 	} catch (err) {
-		self.postMessage({ id: msg.id, type: "error", code: err.code || "ERROR", message: err.message });
+		self.postMessage(Object.assign({ id: msg.id, type: "error" }, errorToData(err)));
 	}
 };

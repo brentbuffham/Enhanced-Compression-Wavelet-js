@@ -3,18 +3,18 @@
 // Message handling inside one decode-pool worker (src/decode/pool.js),
 // kept free of Worker globals so tests can drive it directly.
 // In:  { id, type: "open", blob, cache }          -> { id, result: true }
-//      { id, type: "rows", opts, oy0, oy1 }       -> { id, data: ArrayBuffer } (transferred)
+//      { id, type: "rows", opts, oy0, oy1 }       -> { id, data: ArrayBuffer (transferred), badBlocks }
 //      { type: "abort", id }                      -> that rows job ends with ABORTED
 //      { type: "close" }                          -> closes the reader
 // While rows run: { id, progress } at most every 2 %.
-// Failures: { id, error: { code, message, offset } }.
+// Failures: { id, error: { code, message, offset?, block?, mode? } }.
 // The worker opens the same Blob as the main thread (cloned, not
 // copied) and decodes bands of output rows with the reader's own
 // _plan / _decodeRows, so a band is byte for byte what one thread
 // would produce.
 //==========================================================
 
-import { EcwError, ERROR_CODES } from "../errors.js";
+import { EcwError, ERROR_CODES, errorToData } from "../errors.js";
 import { openEcw } from "../EcwReader.js";
 
 var PROGRESS_STEP = 0.02;
@@ -28,7 +28,7 @@ export function createPoolWorkerHandler(post) {
 	var jobs = new Map();
 
 	function fail(id, err) {
-		post({ id: id, error: { code: (err && err.code) || "ERROR", message: err && err.message ? err.message : String(err), offset: err && err.offset } });
+		post({ id: id, error: errorToData(err) });
 	}
 
 	async function open(m) {
@@ -46,12 +46,12 @@ export function createPoolWorkerHandler(post) {
 		try {
 			var plan = reader._plan(Object.assign({}, m.opts, { signal: controller.signal }));
 			var last = -1;
-			var data = await reader._decodeRows(plan, m.oy0, m.oy1, function (f) {
+			var out = await reader._decodeRows(plan, m.oy0, m.oy1, function (f) {
 				if (f - last < PROGRESS_STEP && f < 1) return;
 				last = f;
 				post({ id: m.id, progress: f });
 			});
-			post({ id: m.id, data: data.buffer }, [data.buffer]);
+			post({ id: m.id, data: out.data.buffer, badBlocks: out.badBlocks }, [out.data.buffer]);
 		} finally {
 			jobs.delete(m.id);
 		}

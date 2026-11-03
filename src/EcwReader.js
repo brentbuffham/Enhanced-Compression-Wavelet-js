@@ -13,9 +13,10 @@ import { BlobSource } from "./io/BlobSource.js";
 import { MemorySource } from "./io/MemorySource.js";
 import { parseHeader } from "./format/EcwHeader.js";
 import { parseLevels } from "./format/EcwLevels.js";
-import { parseBlockIndex, blockGrid, blockRunEntryWindow, blockRunByteRanges } from "./format/EcwBlockIndex.js";
+import { parseBlockIndex, blockGrid, blockRunEntryWindow, blockRunByteRanges, blockEntryWindow, blockByteRange } from "./format/EcwBlockIndex.js";
 import { pixelWindowToBounds } from "./format/georef.js";
-import { createDecodeContext, decodeWindow, imageLevelSize, countWindowBlocks } from "./decode/RegionDecoder.js";
+import { parseWorldFile, parsePrj } from "./format/sidecars.js";
+import { createDecodeContext, decodeWindow, imageLevelSize, countWindowBlocks, locateBlockError, finishBadBlocks } from "./decode/RegionDecoder.js";
 import { sampleWindow } from "./decode/sampleWindow.js";
 import { yuvToRgba, greyToRgba, bandsToRgba } from "./codec/colour.js";
 import { applyColorKey, colorKeysFromOptions } from "./post/applyColorKey.js";
@@ -118,9 +119,11 @@ EcwReader.prototype.readRegion = async function (opts) {
 		throw new EcwError(ERROR_CODES.OUTPUT_TOO_LARGE, "output of " + plan.outW + "x" + plan.outH + " exceeds " + maxBytes + " bytes; use readRegionToScratch");
 	}
 	var report = plan.o.onProgress || function () {};
-	var data = await this._rows(plan, 0, plan.outH, function (f, label) { report(0.95 * f, label); });
+	var out = await this._rows(plan, 0, plan.outH, function (f, label) { report(0.95 * f, label); });
 	report(1, "done");
-	return { data: data, width: plan.outW, height: plan.outH, level: plan.level, bounds: plan.bounds };
+	var result = { data: out.data, width: plan.outW, height: plan.outH, level: plan.level, bounds: plan.bounds };
+	if (plan.skipBad) result.badBlocks = out.badBlocks;
+	return result;
 };
 
 // Step 1) Validate a request and choose its image level (shared by both read paths)
@@ -139,6 +142,7 @@ EcwReader.prototype._plan = function (opts) {
 	if (resample !== "nearest" && resample !== "average") throw invalid("resample must be \"nearest\" or \"average\"");
 	if (o.stretch !== undefined) applyStretch(new Uint8ClampedArray(0), o.stretch);
 	var colorKeys = colorKeysFromOptions(o);
+	if (o.onBadBlock !== undefined && o.onBadBlock !== "throw" && o.onBadBlock !== "skip") throw invalid("onBadBlock must be \"throw\" or \"skip\"");
 	if (o.signal && o.signal.aborted) throw new EcwError(ERROR_CODES.ABORTED, "decode aborted");
 	// Coarsest level still at least as sharp as the output
 	var factor = Math.min(o.width / outW, o.height / outH);
@@ -146,6 +150,7 @@ EcwReader.prototype._plan = function (opts) {
 	var level = h.levelCount - drop;
 	return {
 		o: o, outW: outW, outH: outH, resample: resample, level: level, scale: Math.pow(2, drop), colorKeys: colorKeys,
+		skipBad: o.onBadBlock === "skip",
 		size: imageLevelSize(h, this._levels, level),
 		bounds: pixelWindowToBounds(this.info, o.x, o.y, o.width, o.height)
 	};
@@ -154,6 +159,7 @@ EcwReader.prototype._plan = function (opts) {
 // Steps 2-4) Decode output rows [oy0, oy1) of a plan to RGBA: reconstruct the level rows
 // they need (a fresh decode context, so strips keep the block cache bounded), sample,
 // colour, then the optional post-steps. progress(fraction, label) covers this range.
+// Returns { data, badBlocks } (badBlocks: the blocks skip mode read around).
 EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	var o = plan.o, h = this._header, scale = plan.scale, outW = plan.outW;
 	var lx0 = Math.floor(o.x / scale);
@@ -165,6 +171,12 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	var index = this._index;
 	var ctx = createDecodeContext({
 		header: h, levels: this._levels, index: index, grid: this._grid, signal: o.signal, tileCache: this._cache,
+		onBadBlock: plan.skipBad ? "skip" : "throw",
+		// only asked when a block fails: its file offset, for the error or badBlocks
+		blockOffset: async function (n) {
+			var w = blockEntryWindow(index, n);
+			return blockByteRange(index, n, await blobSource.read(w.start, w.end), blobSource.size).start;
+		},
 		// a row of neighbouring blocks is back to back in the file: two reads for the lot
 		fetchBlocks: async function (n0, n1) {
 			var w = blockRunEntryWindow(index, n0, n1);
@@ -178,7 +190,13 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	progress(0, "reading " + total + " blocks");
 	// tile padding can fetch more blocks than counted, cache hits fewer
 	ctx.onBlock = function (done) { progress(Math.min(1, done / total), "decoded " + done + " blocks"); };
-	var win = await decodeWindow(ctx, plan.level, lx0, ly0, lx1, ly1);
+	var win;
+	try {
+		win = await decodeWindow(ctx, plan.level, lx0, ly0, lx1, ly1);
+	} catch (err) {
+		throw await locateBlockError(ctx, err);
+	}
+	var badBlocks = plan.skipBad ? await finishBadBlocks(ctx) : [];
 	// Eighths are all the colour step uses (it floors to integers) and what cached
 	// tiles hold, so flooring here keeps "average" identical with or without a cache
 	win.bands.forEach(function (band) { for (var i = 0; i < band.length; i++) band[i] = Math.floor(band[i] * 8) / 8; });
@@ -192,7 +210,7 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	if (plan.colorKeys) applyColorKey(data, plan.colorKeys);
 	if (o.stretch !== undefined) applyStretch(data, o.stretch);
 	if (o.clipPolygon) clipToPolygon(data, outW, plan.outH, plan.bounds, o.clipPolygon, oy0);
-	return data;
+	return { data: data, badBlocks: badBlocks };
 };
 
 /**
@@ -244,12 +262,15 @@ EcwReader.prototype.readRegionToScratch = async function (opts) {
 	var id = "region-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
 	var writer = await openScratchSyncWriter(id, scratchOpts);
 	this._scratchIds.push({ id: id, options: scratchOpts });
+	var badBlocks = [];
 	try {
 		for (var s = 0; s < strips; s++) {
 			var oy0 = s * rowsPerStrip;
 			var oy1 = Math.min(plan.outH, oy0 + rowsPerStrip);
 			var label = "strip " + (s + 1) + " of " + strips + ": ";
-			var data = await this._rows(plan, oy0, oy1, function (f, text) { report((s + f) / strips * 0.99, label + text); });
+			var out = await this._rows(plan, oy0, oy1, function (f, text) { report((s + f) / strips * 0.99, label + text); });
+			var data = out.data;
+			badBlocks = mergeBadBlocks(badBlocks, out.badBlocks);
 			writer.write(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
 		}
 		writer.close();
@@ -260,11 +281,28 @@ EcwReader.prototype.readRegionToScratch = async function (opts) {
 	}
 	report(1, "done");
 	var byteLength = plan.outW * plan.outH * 4;
-	return {
+	var result = {
 		scratchId: id, width: plan.outW, height: plan.outH, level: plan.level, bounds: plan.bounds, byteLength: byteLength,
 		openReader: function () { return openScratchReader(id, Object.assign({ byteLength: byteLength }, scratchOpts)); }
 	};
+	if (plan.skipBad) result.badBlocks = badBlocks;
+	return result;
 };
+
+// Bad-block lists from several strips or workers, one entry per block, in block order
+// (a block shared by two bands of rows lists the streams each one hit, once)
+function mergeBadBlocks(a, b) {
+	if (!b || !b.length) return a;
+	var byBlock = new Map();
+	a.concat(b).forEach(function (r) {
+		var seen = byBlock.get(r.block);
+		if (!seen) { byBlock.set(r.block, Object.assign({}, r, { streams: r.streams.slice() })); return; }
+		r.streams.forEach(function (st) {
+			if (!seen.streams.some(function (x) { return x.band === st.band && x.subband === st.subband; })) seen.streams.push(st);
+		});
+	});
+	return Array.from(byBlock.values()).sort(function (x, y) { return x.block - y.block; });
+}
 
 // Remove one of this reader's scratch files (and forget it)
 EcwReader.prototype._removeScratch = async function (id) {
@@ -379,6 +417,7 @@ async function decodeBands(pool, plan, oy0, oy1, report) {
 	var k = Math.min(pool.size, rows);
 	var opts = postableOptions(plan.o);
 	var out = new Uint8ClampedArray(plan.outW * rows * 4);
+	var badBlocks = [];
 	var share = new Float64Array(k);
 	var label = "decoding in " + k + " workers";
 	var stop = new AbortController();
@@ -397,8 +436,9 @@ async function decodeBands(pool, plan, oy0, oy1, report) {
 					var sum = 0;
 					for (var s = 0; s < k; s++) sum += share[s];
 					report(sum, label);
-				}, stop.signal).then(function (data) {
-					out.set(data, (b0 - oy0) * plan.outW * 4);
+				}, stop.signal).then(function (res) {
+					out.set(res.data, (b0 - oy0) * plan.outW * 4);
+					badBlocks = mergeBadBlocks(badBlocks, res.badBlocks);
 				}, function (err) {
 					// one band failing stops the others
 					stop.abort();
@@ -410,7 +450,7 @@ async function decodeBands(pool, plan, oy0, oy1, report) {
 	} finally {
 		if (signal) signal.removeEventListener("abort", onAbort);
 	}
-	return out;
+	return { data: out, badBlocks: badBlocks };
 }
 
 /** Release resources and delete this reader's scratch files. Safe to call more than once. */
@@ -428,15 +468,72 @@ EcwReader.prototype.close = async function () {
 	while (this._scratchIds.length) await this._removeScratch(this._scratchIds[0].id);
 };
 
+// A sidecar passed as text or as a Blob/File; null when not given
+async function sidecarText(value, name) {
+	if (value === undefined || value === null) return null;
+	if (typeof value === "string") return value;
+	if (value && typeof value.text === "function") return await value.text();
+	throw invalid(name + " must be a string, Blob or File");
+}
+
+// Cell sizes within this fraction of each other agree (world files round to ~6 places)
+var SIDECAR_CELL_TOLERANCE = 1e-4;
+// Origins within this fraction of a cell agree
+var SIDECAR_ORIGIN_TOLERANCE = 1e-3;
+
+function formatNumber(v) { return String(Number(v.toPrecision(12))); }
+
+// Add worldFile, crs, georefSource and warnings to info. The header stays the
+// georeferencing source unless georef is "worldFile".
+function applySidecars(info, worldText, prjText, georef) {
+	var warnings = [];
+	var world = worldText === null ? null : parseWorldFile(worldText);
+	var crs = prjText === null ? null : parsePrj(prjText);
+	if (world) {
+		var rotated = world.rotationX !== 0 || world.rotationY !== 0;
+		if (rotated && georef === "worldFile") throw new EcwError(ERROR_CODES.NOT_IMPLEMENTED, "rotated world files are not supported");
+		if (rotated) warnings.push("world file is rotated; its rotation is not used");
+		[["cellSizeX", "cell size X"], ["cellSizeY", "cell size Y"]].forEach(function (p) {
+			var h = info[p[0]], w = world[p[0]];
+			if (Math.abs(h - w) > SIDECAR_CELL_TOLERANCE * Math.max(Math.abs(h), Math.abs(w))) {
+				warnings.push("world file " + p[1] + " " + formatNumber(w) + " differs from the header's " + formatNumber(h));
+			}
+		});
+		[["originX", "cellSizeX", "X"], ["originY", "cellSizeY", "Y"]].forEach(function (p) {
+			var diff = world[p[0]] - info[p[0]];
+			var cell = Math.abs(info[p[1]]) || 1;
+			if (Math.abs(diff) > SIDECAR_ORIGIN_TOLERANCE * cell) {
+				warnings.push("world file origin " + p[2] + " differs from the header's by " + formatNumber(diff) + " (" + formatNumber(diff / cell) + " cells)");
+			}
+		});
+		if (georef === "worldFile") {
+			info.cellSizeX = world.cellSizeX;
+			info.cellSizeY = world.cellSizeY;
+			info.originX = world.originX;
+			info.originY = world.originY;
+		}
+	}
+	if (crs && crs.units) info.units = crs.units;
+	info.worldFile = world;
+	info.crs = crs;
+	info.georefSource = georef;
+	info.warnings = warnings;
+}
+
 /**
  * Open an ECW file and read its header, georeferencing and level table.
  * @param {Blob} blob - A File or Blob.
  * @param {{cache?: false|{tileSize?:number, memoryBytes?:number,
- *   opfs?:boolean|{root?:object, dir?:string, maxBytes?:number}}, threads?:number}} [options]
+ *   opfs?:boolean|{root?:object, dir?:string, maxBytes?:number}}, threads?:number,
+ *   worldFile?:string|Blob, prj?:string|Blob, georef?:"header"|"worldFile"}} [options]
  *   cache: reconstructed tiles are kept in memory (256 MB) by default; false turns
  *   caching off; opfs also keeps them in OPFS (512 MB) for later sessions.
  *   threads: 0 or unset = automatic (up to 4 workers for outputs of 1 megapixel
  *   or more, unless the OPFS cache is on), 1 = this thread only, n = n workers.
+ *   worldFile, prj: sidecar text or files (see pickSidecars). With either, info gains
+ *   worldFile, crs, georefSource and warnings, and units comes from the prj.
+ *   georef: "header" (default) keeps the header's georeferencing and warns when the
+ *   world file disagrees; "worldFile" uses the world file's instead.
  * @returns {Promise<EcwReader>}
  */
 export async function openEcw(blob, options) {
@@ -446,6 +543,11 @@ export async function openEcw(blob, options) {
 	}
 	var threads = options ? options.threads : undefined;
 	if (threads !== undefined && (!Number.isInteger(threads) || threads < 0)) throw invalid("threads must be an integer of 0 or more");
+	var georef = options && options.georef !== undefined ? options.georef : "header";
+	if (georef !== "header" && georef !== "worldFile") throw invalid("georef must be \"header\" or \"worldFile\"");
+	var worldText = await sidecarText(options && options.worldFile, "worldFile");
+	var prjText = await sidecarText(options && options.prj, "prj");
+	if (georef === "worldFile" && worldText === null) throw invalid("georef \"worldFile\" needs a worldFile");
 	var blobSource = new BlobSource(blob);
 	var bytes = await blobSource.read(0, Math.min(HEADER_READ_BYTES, blobSource.size));
 	var source = new MemorySource(bytes);
@@ -458,6 +560,7 @@ export async function openEcw(blob, options) {
 			fingerprint: c.opfs ? await fileFingerprint(blob) : undefined });
 	}
 	var reader = new EcwReader(blobSource, header, levels, bytes, cache);
+	if (worldText !== null || prjText !== null) applySidecars(reader.info, worldText, prjText, georef);
 	reader._threads = threads || 0;
 	reader._cacheOpts = cacheOpts === false ? false : (cacheOpts || {});
 	return reader;

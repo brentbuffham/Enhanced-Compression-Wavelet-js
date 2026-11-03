@@ -35,8 +35,10 @@ test("a pool of 2 decodes bands on its workers, the same bytes as this thread", 
 		pool.rows(0, { opts: OPTS, oy0: 0, oy1: 20 }, function (f) { fractions.push(f); }),
 		pool.rows(1, { opts: OPTS, oy0: 20, oy1: 48 })
 	]);
-	assert.deepEqual(Array.from(bands[0]), Array.from(await direct._decodeRows(plan, 0, 20, function () {})));
-	assert.deepEqual(Array.from(bands[1]), Array.from(await direct._decodeRows(plan, 20, 48, function () {})));
+	assert.deepEqual(Array.from(bands[0].data), Array.from((await direct._decodeRows(plan, 0, 20, function () {})).data));
+	assert.ok(bands[0].data.length > 0);
+	assert.deepEqual(bands[0].badBlocks, []);
+	assert.deepEqual(Array.from(bands[1].data), Array.from((await direct._decodeRows(plan, 20, 48, function () {})).data));
 	assert.ok(fractions.length >= 1);
 	pool.close();
 	pool.close();
@@ -66,6 +68,6 @@ test("abort: a queued band rejects at once, a running band is told to stop", asy
 	await assert.rejects(running, { code: "ABORTED" });
 	await assert.rejects(pool.rows(0, { opts: OPTS, oy0: 0, oy1: 1 }, null, ctl.signal), { code: "ABORTED" });
 	// the worker is free again afterwards
-	assert.equal((await pool.rows(0, { opts: OPTS, oy0: 0, oy1: 2 })).length, 64 * 2 * 4);
+	assert.equal((await pool.rows(0, { opts: OPTS, oy0: 0, oy1: 2 })).data.length, 64 * 2 * 4);
 	pool.close();
 });

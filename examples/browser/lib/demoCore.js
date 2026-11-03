@@ -86,7 +86,8 @@ export async function inspectBlock(blob, index, grid, info, n) {
 	var level = levelOfBlock(grid, n);
 	var g = grid[level];
 	var local = n - g.firstBlock;
-	var streams = splitBlockStreams(await source.read(range.start, range.end), info.bands, level);
+	// keepUnsupported: show a mode the library can't decode instead of failing
+	var streams = splitBlockStreams(await source.read(range.start, range.end), info.bands, level, { offset: range.start, keepUnsupported: true });
 	return {
 		n: n,
 		level: level,
@@ -102,7 +103,8 @@ export async function inspectBlock(blob, index, grid, info, n) {
 
 /**
  * Tally stream modes over evenly spaced blocks of one level.
- * @returns {Promise<{sampled:number, modes:{2:number, 5:number, 6:number}, emptyShare:number}>}
+ * @returns {Promise<{sampled:number, modes:Object<number, number>, emptyShare:number}>}
+ *   modes always has 2, 5 and 6, plus any other mode met.
  */
 export async function sampleModes(blob, index, grid, info, level, count, onProgress) {
 	var g = grid[level];
@@ -113,7 +115,7 @@ export async function sampleModes(blob, index, grid, info, level, count, onProgr
 	for (var i = 0; i < sampled; i++) {
 		var n = g.firstBlock + Math.floor(i * blocks / sampled);
 		var block = await inspectBlock(blob, index, grid, info, n);
-		block.streams.forEach(function (s) { modes[s.mode]++; streams++; });
+		block.streams.forEach(function (s) { modes[s.mode] = (modes[s.mode] || 0) + 1; streams++; });
 		if (i % 16 === 0) onProgress(i / sampled, "sampling level " + level);
 	}
 	onProgress(1, "sampled " + sampled + " blocks");

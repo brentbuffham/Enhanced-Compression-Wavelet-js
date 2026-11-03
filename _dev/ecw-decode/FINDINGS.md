@@ -68,6 +68,7 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
   - `6`: coded stream, a second method (1,333).
 - Streams 3 to 8 (bands 1 and 2) are empty in about 98% of blocks, while streams 0 to 2 are coded about 40% of the time. Hypothesis: an internal luma/chroma colour transform, with chroma detail mostly quantised to zero.
 - Whole-block entropy is about 7.5 bits/byte: real entropy coding, not raw coefficients.
+- Full census (`modeCensus.mjs`, 2026-11-03): reads every block's stream table and each stream's first byte, rather than a sample. On samples A, B and C, and on every crafted file, every stream is mode 2, 5 or 6, every stream table is consistent, and the block index ends exactly at the file size. Run it on each new file: the sample test frames only 2,000 spaced blocks, so a rare mode can hide from it.
 
 ## ⭐ CRACKED: mode 6 streams (run-length words)
 

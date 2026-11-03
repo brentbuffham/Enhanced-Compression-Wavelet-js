@@ -11,7 +11,7 @@
 //==========================================================
 
 import { EcwError, ERROR_CODES } from "../errors.js";
-import { STREAM_MODE } from "../format/EcwBlockFrame.js";
+import { STREAM_MODE, unsupportedModeError } from "../format/EcwBlockFrame.js";
 
 var TAG_PLUS = 0;
 var TAG_MINUS = 1;
@@ -125,5 +125,5 @@ export function decodeStream(stream, count) {
 	if (stream.mode === STREAM_MODE.EMPTY) return new Int32Array(count);
 	if (stream.mode === STREAM_MODE.CODED_B) return decodeMode6(stream.bytes, count);
 	if (stream.mode === STREAM_MODE.CODED_A) return decodeMode2(stream.bytes, count);
-	throw bad("unknown stream mode " + stream.mode);
+	throw unsupportedModeError(stream.mode, "a stream");
 }

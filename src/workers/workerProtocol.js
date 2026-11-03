@@ -3,20 +3,20 @@
 // Message protocol behind the ecw-js/worker entry, kept free of
 // Worker globals so it can be driven directly (tests, custom hosts).
 // In:  { id, type, payload }
-//   open                { blob, cache?, threads? } -> reader info (options as in openEcw)
+//   open                { blob, cache?, threads?, worldFile?, prj?, georef? } -> reader info (options as in openEcw)
 //   readRegion          readRegion options  -> { data, width, height, level, bounds }
 //   readRegionToScratch readRegion options  -> { scratchId, width, height, level, bounds, byteLength }
 //   abort               { id }              -> cancels that job (it rejects ABORTED)
 //   close                                    -> closes the reader, removing its scratch files
 // Out: { id, type: "progress", fraction, label } while a job runs, then
-//      { id, type: "result", result } or { id, type: "error", code, message }.
+//      { id, type: "result", result } or { id, type: "error", code, message, offset?, block?, mode? }.
 // Pixel buffers are transferred, not copied. One open file per handler:
 // open and close abort the reads still running on the current file and
 // wait for them to settle before closing it. A job id that is still
 // running can't be reused.
 //==========================================================
 
-import { EcwError, ERROR_CODES } from "../errors.js";
+import { EcwError, ERROR_CODES, errorToData } from "../errors.js";
 import { openEcw } from "../EcwReader.js";
 
 /**
@@ -61,6 +61,7 @@ export function createWorkerHandler(post) {
 			var options = {};
 			if (payload && payload.cache !== undefined) options.cache = payload.cache;
 			if (payload && payload.threads !== undefined) options.threads = payload.threads;
+			["worldFile", "prj", "georef"].forEach(function (k) { if (payload && payload[k] !== undefined) options[k] = payload[k]; });
 			reader = await openEcw(payload && payload.blob, options);
 			return { result: reader.info };
 		},
@@ -70,7 +71,7 @@ export function createWorkerHandler(post) {
 		},
 		readRegionToScratch: async function (id, payload, controller) {
 			var out = await needReader().readRegionToScratch(readOptions(id, payload, controller));
-			return { result: { scratchId: out.scratchId, width: out.width, height: out.height, level: out.level, bounds: out.bounds, byteLength: out.byteLength } };
+			return { result: { scratchId: out.scratchId, width: out.width, height: out.height, level: out.level, bounds: out.bounds, byteLength: out.byteLength, badBlocks: out.badBlocks } };
 		},
 		abort: async function (id, payload) {
 			var job = jobs.get(payload && payload.id);
@@ -103,7 +104,7 @@ export function createWorkerHandler(post) {
 			var out = await handler(id, msg.payload, controller);
 			post({ id: id, type: "result", result: out.result }, out.transfer || []);
 		} catch (err) {
-			post({ id: id, type: "error", code: (err && err.code) || "ERROR", message: err && err.message ? err.message : String(err) });
+			post(Object.assign({ id: id, type: "error" }, errorToData(err)));
 		} finally {
 			if (settle) {
 				jobs.delete(id);

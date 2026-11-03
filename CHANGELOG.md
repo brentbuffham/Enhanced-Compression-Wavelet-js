@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **New error code `UNSUPPORTED_MODE`.** A stream in a mode ecw-js doesn't decode now raises `UNSUPPORTED_MODE` instead of `BAD_BLOCK`, with `error.mode` holding the mode byte. Its message asks for an ECW that uses the mode, sent to blastingapps.com, so support can be added clean-room. `BAD_BLOCK` now means a damaged block only.
+- **Errors name their block.** `BAD_BLOCK` and `UNSUPPORTED_MODE` errors raised from a block have `error.block` (`{ number, level, row, col, offset }`), and the message starts with the same location. `error.offset` is now always a file offset; it used to be relative to the block for stream table errors. Errors from workers keep these fields.
+- **`onBadBlock: "skip"`** (opt-in) on `readRegion` and `readRegionToScratch`: streams that can't be decoded are read as empty, and the result lists them in `badBlocks`. Tiles built around skipped blocks are never cached. The default is still `"throw"`.
+- `splitBlockStreams(bytes, bands, level, { offset, keepUnsupported })`: `offset` makes error offsets file offsets.
+- README: the decoded stream modes are listed at the top.
+- **World file and .prj sidecars.** `openEcw(file, { worldFile, prj })` takes a world file (`.eww`, `.ecww`, `.wld`) and a `.prj` as text or Files. `info` gains `crs` (WKT plus its name, datum, projection, units and any EPSG code), `worldFile`, `georefSource` and `warnings`, and `units` comes from the `.prj`. The header stays the source of the georeferencing, unless you pass `georef: "worldFile"`.
+- New exports `parseWorldFile`, `parsePrj` and `pickSidecars`, which matches `site.ecw` to `site.eww` / `site.prj` in a list of files.
+- `ecw-js/worker`: `open` passes `worldFile`, `prj` and `georef` through.
+- Demo: drop or open the `.eww` / `.prj` together with the `.ecw`. The Info tab shows units, the world file, the CRS name and any warnings.
+- Dev: `_dev/ecw-decode/modeCensus.mjs` reads every block's stream table and counts stream modes per level, listing the address of any stream the library doesn't decode. It reads a 3 GB file in about a second when the file is cached.
+
 ## 0.3.1 (2026-11-03)
 
 Faster tile cache. Output is unchanged; the GDAL parity tests run with the cache on.

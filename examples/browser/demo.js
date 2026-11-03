@@ -6,7 +6,7 @@
 // writes the library call it made into "How it works".
 //==========================================================
 
-import { VERSION, openEcw, pixelWindowToBounds, applyTransparency, applyColorKey, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles, blockCacheUsage, clearBlockCache } from "../../src/index.js";
+import { VERSION, openEcw, pickSidecars, pixelWindowToBounds, applyTransparency, applyColorKey, clipToPolygon, listScratchFiles, getScratchFile, removeScratchFile, sweepStaleScratchFiles, blockCacheUsage, clearBlockCache } from "../../src/index.js";
 import { blockSizeColor, sizeRange } from "./lib/colorScale.js";
 import { levelPictureBounds, KEPT_DIR } from "./lib/demoCore.js";
 import { Viewer } from "./viewer.js";
@@ -20,6 +20,8 @@ var worker = null;
 var jobId = 0;
 var pending = new Map();
 var file = null;
+// the .eww / .wld and .prj dropped with the file (pickSidecars)
+var sidecars = { worldFile: null, prj: null };
 var reader = null;
 var opened = null;
 var currentLevel = null;
@@ -61,6 +63,7 @@ function startWorker() {
 }
 
 function run(type, payload, quiet) {
+	if (type === "read" && $("skipToggle").checked) payload = Object.assign({ onBadBlock: "skip" }, payload);
 	return new Promise(function (resolve, reject) {
 		var id = ++jobId;
 		pending.set(id, { resolve: resolve, reject: reject, quiet: quiet });
@@ -76,6 +79,15 @@ function setProgress(fraction, label) {
 	$("progress").value = fraction;
 	$("progressLabel").textContent = label;
 	$("progressLabel").classList.remove("error");
+}
+
+// Status-bar note for a read made with onBadBlock: "skip"
+function skippedNote(img) {
+	if (!img.badBlocks || !img.badBlocks.length) return "";
+	var modes = img.badBlocks.filter(function (b) { return b.mode !== undefined; }).map(function (b) { return b.mode; });
+	var uniq = modes.filter(function (m, i) { return modes.indexOf(m) === i; });
+	return " — skipped " + img.badBlocks.length + " block" + (img.badBlocks.length === 1 ? "" : "s") +
+		(uniq.length ? " (stream mode " + uniq.join(", ") + " not decoded)" : "") + "; details in How it works";
 }
 
 function setError(err) {
@@ -128,11 +140,32 @@ function threadsChoice() {
 }
 
 $("threadsSelect").addEventListener("change", function () {
-	if (file) openFileInDemo(file);
+	if (file) openFileInDemo(file, false, sidecars);
 });
 
-async function openFileInDemo(f, fromKept) {
+// File names and WKT names go into innerHTML
+function escapeHtml(s) {
+	return String(s).replace(/[&<>"']/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; });
+}
+
+// Open the first .ecw in a FileList, with any sidecars dropped beside it
+function openFiles(list) {
+	var files = Array.from(list || []);
+	var ecw = files.filter(function (f) { return /.ecw$/i.test(f.name); })[0] || files[0];
+	if (ecw) openFileInDemo(ecw, false, pickSidecars(ecw, files));
+}
+
+// openEcw options for this thread's reader, and the same as code for the How panel
+function sidecarOptions() {
+	var o = { threads: 1 }, code = [];
+	if (sidecars.worldFile) { o.worldFile = sidecars.worldFile; code.push("worldFile: ewwFile"); }
+	if (sidecars.prj) { o.prj = sidecars.prj; code.push("prj: prjFile"); }
+	return { options: o, code: code.length ? ", " + code.join(", ") : "" };
+}
+
+async function openFileInDemo(f, fromKept, side) {
 	file = f;
+	sidecars = side || { worldFile: null, prj: null };
 	opened = null;
 	basePicture = null;
 	postSteps = null;
@@ -143,14 +176,15 @@ async function openFileInDemo(f, fromKept) {
 	setProgress(0, "opening");
 	try {
 		// this thread's reader only answers info; decoding runs in the demo worker
-		reader = await openEcw(f, { threads: 1 });
+		reader = await openEcw(f, sidecarOptions().options);
 		opened = await run("open", { file: f, opfsCache: $("cacheToggle").checked, threads: threadsChoice() });
 	} catch (err) {
 		setError(err);
 		how("var ecw = await openEcw(file);", { error: err.code, message: err.message });
 		return;
 	}
-	how("var ecw = await openEcw(file, { threads: " + threadsChoice() + " });   // 0 = automatic\necw.info;", reader.info);
+	var picked = sidecars.worldFile || sidecars.prj ? "var { worldFile: ewwFile, prj: prjFile } = pickSidecars(file, droppedFiles);\n" : "";
+	how(picked + "var ecw = await openEcw(file, { threads: " + threadsChoice() + sidecarOptions().code + " });   // threads 0 = automatic\necw.info;", reader.info);
 	$("viewerEmpty").classList.add("hidden");
 	renderInfo();
 	setStats();
@@ -177,7 +211,10 @@ function renderInfo() {
 		["version", i.version], ["width", i.width], ["height", i.height], ["bands", i.bands],
 		["block", i.blockWidth + " × " + i.blockHeight], ["compression target", i.compressionTarget],
 		["cell size X", i.cellSizeX], ["cell size Y", i.cellSizeY], ["origin X", i.originX], ["origin Y", i.originY],
-		["datum", i.datum || "—"], ["projection", i.projection || "—"],
+		["datum", i.datum || "—"], ["projection", i.projection || "—"], ["units", i.units || "—"],
+		["world file", i.worldFile ? escapeHtml(sidecars.worldFile.name) + ": centre " + i.worldFile.centreX + ", " + i.worldFile.centreY : "—"],
+		["prj", i.crs ? escapeHtml(sidecars.prj.name + ": " + i.crs.name) + (i.crs.epsg ? " (EPSG " + i.crs.epsg + ")" : "") : "—"],
+		["sidecar warnings", !i.warnings ? "—" : i.warnings.length ? i.warnings.map(escapeHtml).join("<br>") : "none"],
 		["bounds minX", bounds.minX], ["bounds minY", bounds.minY], ["bounds maxX", bounds.maxX], ["bounds maxY", bounds.maxY],
 		["block index", opened.index.entryCount.toLocaleString() + " entries"], ["data starts", "0x" + opened.index.dataStart.toString(16)]
 	];
@@ -248,12 +285,13 @@ async function sampleLevel() {
 	var count = Math.max(1, Number($("sampleCount").value) || 300);
 	try {
 		var s = await run("sample", { level: currentLevel, count: count });
+		var other = Object.keys(s.modes).filter(function (m) { return m !== "2" && m !== "5" && m !== "6"; });
 		$("levelStats").insertAdjacentHTML("beforeend", [
 			["sampled", s.sampled],
 			["mode 2 streams", s.modes[2]],
 			["mode 6 streams", s.modes[6]],
 			["empty streams", (s.emptyShare * 100).toFixed(1) + "%"]
-		].map(function (r) { return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>"; }).join(""));
+		].concat(other.map(function (m) { return ["mode " + m + " streams (not decoded)", s.modes[m]]; })).map(function (r) { return "<tr><td>" + r[0] + "</td><td>" + r[1] + "</td></tr>"; }).join(""));
 		setStats(["empty streams", (s.emptyShare * 100).toFixed(0) + "%"]);
 		how("// for evenly spaced blocks n in level " + currentLevel + ":\nvar r = blockByteRange(index, n, entryBytes, file.size);\nvar streams = splitBlockStreams(blockBytes, info.bands, " + currentLevel + ");", s);
 	} catch (err) {
@@ -289,7 +327,10 @@ async function inspect(n) {
 		$("blockDetail").innerHTML = "<table class='kv'><tr><td>block</td><td>" + b.n + "</td></tr><tr><td>level / row / col</td><td>" + b.level + " / " + b.row + " / " + b.col +
 			"</td></tr><tr><td>bytes</td><td>0x" + b.start.toString(16) + " + " + (b.end - b.start) + "</td></tr></table>" +
 			"<table class='grid-table'><tr><th>band</th><th>subband</th><th>mode</th><th>bytes</th></tr>" +
-			b.streams.map(function (s) { return "<tr class='mode-" + s.mode + "'><td>" + s.band + "</td><td>" + s.subband + "</td><td>" + s.mode + "</td><td>" + s.length + "</td></tr>"; }).join("") + "</table>";
+			b.streams.map(function (s) {
+				var known = s.mode === 2 || s.mode === 5 || s.mode === 6;
+				return "<tr class='mode-" + s.mode + "'><td>" + s.band + "</td><td>" + s.subband + "</td><td>" + s.mode + (known ? "" : " (not decoded)") + "</td><td>" + s.length + "</td></tr>";
+			}).join("") + "</table>";
 		how("var win = blockEntryWindow(index, " + n + ");\nvar r = blockByteRange(index, " + n + ", entryBytes, file.size);\nsplitBlockStreams(blockBytes, info.bands, " + b.level + ");", b.streams);
 	} catch (err) {
 		if (err.code !== "ABORTED") $("blockDetail").textContent = err.message;
@@ -403,7 +444,7 @@ async function refineView() {
 		var img = await run("read", Object.assign({ x: x0, y: y0, width: x1 - x0, height: y1 - y0, outWidth: outW, outHeight: outH, resample: $("readResample").value }, postSteps), true);
 		if (seq === refineSeq) {
 			viewer.setDetail({ rgba: img.data, width: img.width, height: img.height, bounds: img.bounds });
-			setProgress(1, "detail " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
+			setProgress(1, "detail " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms" + skippedNote(img));
 		}
 	} catch (err) {
 		if (err.code !== "ABORTED") setError(err);
@@ -445,8 +486,10 @@ async function runRead() {
 		postSteps = null;
 		viewer.setPicture({ rgba: img.data.slice(), width: img.width, height: img.height, bounds: img.bounds, smooth: true });
 		imageMode = true;
-		setProgress(1, "decoded " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms");
-		how(code, { width: img.width, height: img.height, level: img.level, bounds: img.bounds, "ecw.cacheStats()": img.cache });
+		setProgress(1, "decoded " + img.width + "×" + img.height + " from level " + img.level + " in " + Math.round(performance.now() - t0) + " ms" + skippedNote(img));
+		var shown = { width: img.width, height: img.height, level: img.level, bounds: img.bounds, "ecw.cacheStats()": img.cache };
+		if (img.badBlocks) shown.badBlocks = img.badBlocks;
+		how(img.badBlocks ? code.replace("({", "({\"onBadBlock\":\"skip\",") : code, shown);
 	} catch (err) {
 		how(code, { error: err.code, message: err.message });
 		if (err.code !== "ABORTED") setError(err);
@@ -533,7 +576,7 @@ document.querySelectorAll(".tab").forEach(function (tab) {
 });
 
 $("togglePanel").addEventListener("click", function () { document.querySelector(".layout").classList.toggle("panel-hidden"); });
-$("fileInput").addEventListener("change", function (e) { if (e.target.files[0]) openFileInDemo(e.target.files[0]); });
+$("fileInput").addEventListener("change", function (e) { openFiles(e.target.files); });
 $("levelSelect").addEventListener("change", function (e) { showLevel(Number(e.target.value)); });
 $("sampleButton").addEventListener("click", sampleLevel);
 $("drawButton").addEventListener("click", function () { viewer.startPolygon(); $("drawButton").classList.add("active"); });
@@ -581,6 +624,12 @@ if (window.matchMedia && matchMedia("(color-gamut: p3)").matches) {
 		try { localStorage.setItem("ecw-demo-vivid", e.target.checked ? "1" : "0"); } catch (err) { /* storage blocked */ }
 	});
 }
+try { $("skipToggle").checked = localStorage.getItem("ecw-demo-skip") === "1"; } catch (err) { /* storage blocked */ }
+$("skipToggle").addEventListener("change", function (e) {
+	try { localStorage.setItem("ecw-demo-skip", e.target.checked ? "1" : "0"); } catch (err) { /* storage blocked */ }
+	// read the current window again with the new setting
+	if (opened) { refineSeq++; runRead(); }
+});
 try { $("keepToggle").checked = localStorage.getItem("ecw-demo-keep") === "1"; } catch (err) { /* storage blocked */ }
 $("keepToggle").addEventListener("change", function (e) {
 	try { localStorage.setItem("ecw-demo-keep", e.target.checked ? "1" : "0"); } catch (err) { /* storage blocked */ }
@@ -596,6 +645,5 @@ window.addEventListener("drop", function (e) {
 	e.preventDefault();
 	dragDepth = 0;
 	$("dropOverlay").classList.add("hidden");
-	var f = e.dataTransfer.files[0];
-	if (f) openFileInDemo(f);
+	openFiles(e.dataTransfer.files);
 });
