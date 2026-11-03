@@ -83,9 +83,8 @@ export function buildCodedFile(o) {
 			}
 		}
 	});
-	var bytes = buildEcwFile({
-		headerOverrides: { width: o.width, height: o.height, levelCount: o.levelCount, bands: bands, blockWidth: block, blockHeight: block, levels: levels, colorSpace: o.colorSpace === undefined ? 2 : o.colorSpace },
-		blocks: blocks
-	});
+	var header = { width: o.width, height: o.height, levelCount: o.levelCount, bands: bands, blockWidth: block, blockHeight: block, levels: levels, colorSpace: o.colorSpace === undefined ? 2 : o.colorSpace };
+	if (o.compressionTarget !== undefined) header.compressionTarget = o.compressionTarget;
+	var bytes = buildEcwFile({ headerOverrides: header, blocks: blocks });
 	return { bytes: bytes, levels: levels };
 }

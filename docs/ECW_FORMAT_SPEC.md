@@ -6,7 +6,7 @@ A plain description of the ERDAS ECW (Enhanced Compression Wavelet) version 2 ra
 
 Everything here comes from the bytes of real ECW files and from comparing decoded output with what GDAL produces through the ECW SDK, used purely as a black box. Some rules were found by writing small ECW files with chosen coefficients and watching how the SDK decodes them. No ECW SDK source code (libecw or Hexagon) was read, copied or translated.
 
-**Confidence.** Each rule below reproduces the SDK's output bit for bit on three independent RGB files: two large orthophotos from different encoding runs and a small image from another source, in projected and geographic coordinates, at compression targets from 8 to 25. That's about 28 million pixels across every overview level and full-resolution crops, with no differences. All three are 3-band, 64×64-block, version 2. Greyscale, multiband and non-yuv colour spaces have been checked on constructed files only (written with chosen coefficients and decoded by the SDK; about 200,000 pixels, no differences). Other block sizes and ECW version 3 haven't been seen. Fields still not understood are listed under [Unknowns](#unknowns).
+**Confidence.** Each rule below reproduces the SDK's output bit for bit on three independent RGB files: two large orthophotos from different encoding runs and a small image from another source, in projected and geographic coordinates, at compression targets from 8 to 25. That's about 28 million pixels across every overview level and full-resolution crops, with no differences. All three are 3-band, 64×64-block, version 2. Greyscale, multiband and non-yuv colour spaces have been checked on constructed files only (written with chosen coefficients and decoded by the SDK; about 200,000 pixels, no differences). Other block sizes and ECW version 3 haven't been seen. A fourth real file, a large orthophoto at compression target 10, matches too once the [output dither](#output-dither) is added: every level, over 10 million pixels in all. Fields still not understood are listed under [Unknowns](#unknowns).
 
 ## Conventions
 
@@ -203,6 +203,20 @@ Each result is clamped to 0 to 255. Each table is `T(c) = floor(k·c + offset + 
 
 These are close to BT.601 but not equal, and the offsets mean all-zero data decodes to (1, 0, 1). They reproduce every table entry the SDK produces.
 
+### Output dither
+
+The SDK adds a fixed dither to some output levels. It applies when all of these hold:
+
+- the header's compression target (`0x16`) is 10 or more (9 and below: never);
+- the file has 5 or more level records;
+- the image level being output is one of the finest three: `n − 2`, `n − 1` or `n` (full resolution), for `n` records.
+
+Only luma is dithered: band 0 of yuv files, and the band of greyscale files. Files in the rgb and multiband colour spaces aren't dithered.
+
+The dither is one 64×64 table of multiples of 1/8 from −5 to +5, with 81 values used about evenly. Its 4,096 entries are in `src/codec/dither.js`; they were measured, not derived. Entry `(y mod 64, x mod 64)` is added to pixel `(x, y)` of the image level, counted from the level's origin, after the level is floored to eighths and before the colour step floors it to an integer. Every level uses the same table at its own pixel positions.
+
+It's output-only. A level that feeds the next synthesis is used clean, so the dither of one level never shows up in the next. The quantisation steps play no part: a file whose steps are all 1 is dithered the same way.
+
 ## Notes for comparing with GDAL
 
 - GDAL's overview `k` is image level `k`, but sized by `floor` where the level table uses `ceil`.
@@ -215,3 +229,5 @@ These are close to BT.601 but not equal, and the offsets mean all-zero data deco
 
 - Header bytes `0x02`, `0x05` and `0x10`, and the block index flag byte at `E + 4`. Byte `0x05` must be 4 for the SDK to decode a 3-band file.
 - Real (not constructed) files with other than 3 bands, other block sizes, and ECW version 3.
+- Whether the output dither has a seed or other inputs that vary between files: only one real dithered file has been seen. Constructed files built on an undithered file's header (target raised to 10), with 5 to 10 levels and other content and sizes, showed exactly the same table.
+- Green is occasionally 1 off on constructed files with very strong red chroma (Cr around 114 and above), with or without the dither. It hasn't been seen in real data.

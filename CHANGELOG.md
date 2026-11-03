@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- **The SDK's output dither is reproduced.** For files written at a compression target of 10 or more, with at least five levels, the ECW SDK adds a fixed 64×64 grain of up to ±5 to the brightness of the three finest levels. ecw-js now adds the same grain, so those levels match GDAL bit for bit; before, they were up to ±5 off on about 90% of pixels. It covers yuv luma and greyscale; rgb and multiband files aren't dithered, as in the SDK. Files below target 10 are unchanged.
+- `readRegion` / `readRegionToScratch` option `dither` (default `true`): `false` gives the clean values without the grain.
+- Spec: `docs/ECW_FORMAT_SPEC.md` gains "Output dither".
+
 ## 0.5.0 (2026-11-03)
 
 - **Stream mode 3 is decoded.** It's an adaptive range coder over bytes: a textbook quasistatic model, 257 symbols at total 4096, with the coefficients as little-endian int16. It turns up in short blocks cut off by a level's bottom edge. Files that raised `UNSUPPORTED_MODE` for mode 3 in 0.4.0 now read in full; with `onBadBlock: "skip"` they no longer list those blocks in `badBlocks`.

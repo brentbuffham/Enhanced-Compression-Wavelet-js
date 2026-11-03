@@ -98,6 +98,27 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
 - Example (9 nodes): tree `. +1 . z62 . . z3585 z319 −1`, data `2b ef 32 00` → `z319 +1 z62 +1 0 z62 0 +1 z62 +1 z3585`: a short vertical line of coefficients at columns 62–63, rows 4–7.
 - Ruled out on the way: u32 table length (the first two `00` after `N` are tree nodes); bit-packed trees; reading short tokens as all-values or `5v` as runs.
 
+## ⭐ SOLVED: output dither (sample D's ±5 at levels 8–10)
+
+- **What it is:** the SDK adds a fixed 64×64 table of eighths (−5 to +5) to luma at the three finest output levels of files whose compression target is 10 or more and that have at least 5 levels. It isn't a decode error: our reconstruction was already right underneath. Spec: `docs/ECW_FORMAT_SPEC.md` "Output dither"; code: `src/codec/dither.js`.
+- **How it was established (2026-11-04, BLUE; GDAL as a black box, no ECW source or web search).**
+  - Localised on sample D: at the image centre levels 5–7 are exact and level 8 isn't, so the error enters with record 7. Dequantisation variants for record 7 luma (steps 1, 3, 4; ±0.5 and ±1 reconstruction offsets; zeroing or swapping subbands) all made it worse, so the steps and subbands were right.
+  - The difference is white noise: equal on R, G and B (luma), uniform from −5 to +5 with ±5 at half weight, neighbour correlation 0.025, flat across pixel parity and brightness. Wavelet coefficient errors would correlate neighbours.
+  - Deterministic and tied to image position: a repeated GDAL read is identical, and two overlapping windows agree on their overlap.
+  - Output-only: the differences at levels 8, 9 and 10 are uncorrelated with each other (D8(x,y) against D9(2x,2y): −0.009), so the noise of one level doesn't feed the next.
+  - Period 64 in x and y (values 64 apart agree 67% of the time, against about 10% for random). With our pre-floor luma `Y` known exactly, each pixel pins its table entry to `[d − frac(Y), d + 1 − frac(Y))`. Intersecting over about 2.7 million pixels from levels 8, 9 and 10 gave no empty intervals, every entry pinned to width exactly 1/8 at a multiple of 1/8, and the same table at all three levels (correlation 1.000), indexed by `(y mod 64, x mod 64)` of each level's own pixels.
+  - Common C `rand()` generators (MSVC, ANSI LCG, 31-bit; `% 81 − 40` and scaled; row- and column-major) don't produce it, so the table is stored as measured.
+  - Trigger, with crafted files decoded by GDAL (`craft.mjs` with a chosen header template):
+    - sample A's header with D's steps: exact; D's header: dithered;
+    - copying only header byte `0x17` (compression target, A 8 → D 10) into A's header turns it on, while copying the georeferencing or the name strings doesn't;
+    - targets 1–9 are never dithered, and 10, 11, 12, 16, 20, 25, 40, 100 and 255 all give the same amplitude;
+    - level count: 2–4 levels are never dithered; with 5, 6, 8 or 10 levels exactly the top three output levels are dithered;
+    - all steps set to 1 dither the same way, so the steps play no part;
+    - colour spaces: yuv dithers band 0, and so does greyscale (90% off without it, exact with it); rgb (4) and multiband (3) aren't dithered at all.
+  - That accounts for every file: A (target 8) and B (9) are below the threshold, C (25) has 2 levels, and D (10, 10 levels) dithers levels 8–10. B rechecked on content at levels 7–10 with today's GDAL: exact.
+- **Result.** Library parity on sample D (default threads, today's GDAL): 0 differing pixels at every level 1–10 at the centre, on odd-sized and odd-offset full-resolution windows, at the top-left, and on the bottom and right edges (aligned). `readRegion({ dither: false })` gives the clean values.
+- **Side finding (open).** Constructed yuv files with Cr around 114 and above have green 1 off in about 0.2% of pixels, with or without the dither (`T_GR` near a rounding boundary: −0.71464·114 + 0.47 = −80.999). Not seen in real data.
+
 ## ⭐ CRACKED: mode 3 streams (range-coded bytes)
 
 - **What it is:** an off-the-shelf adaptive range coder, not a custom scheme.
@@ -114,8 +135,8 @@ Right after the level table (`E = 0x59 + 21 × levelCount`):
   - The library decoder matches the scratch decoder on all 137 streams (9 ms in total).
   - GDAL pixel parity on sample D (PINK, library reads with skip off against gdal_translate): bit-exact, 0 differing pixels, at levels 1–7. That covers the whole image at levels 1–4 (block 83's level 2), the bottom-right corner, and the bottom edge at levels 5–7 (the mode-3 blocks are at level 6).
   - Open on sample D, not mode 3 (the image centre shows the same, and 0.4.0 has it too):
-    - levels 8–10 are ±5 off everywhere (about 90% of pixels, all three channels together, so likely luma; check this sample's quantisation steps for the finest records);
-    - a reduced read whose y isn't a multiple of the scale is one row off GDAL's nearest-neighbour phase;
+    - ~~levels 8–10 are ±5 off everywhere~~ solved: the SDK's output dither, see "⭐ SOLVED: output dither" below;
+    - a reduced read whose x or y isn't a multiple of the scale is off GDAL's nearest-neighbour phase (re-seen 2026-11-04: x odd at level 9, y not a multiple of 4 at level 8; the same windows snapped to the scale are exact);
     - reads with unequal x/y scales don't match;
     - level 0 is off (max 119).
 - **Why it took so long (the lesson).**

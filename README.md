@@ -102,6 +102,7 @@ var img = await ecw.readRegion({
 	transparentAbove: 250,                   // optional: near-white becomes transparent
 	transparentColor: { color: "#3a5f2b", below: 6, above: 6 }, // optional: a colour ± tolerance (or a list of them)
 	clipPolygon: [[[x1, y1], [x2, y2], [x3, y3]]], // optional: map-coordinate rings
+	dither: false,                           // optional: leave out the SDK's output dither (default true, see below)
 	onBadBlock: "skip"                       // optional: read around blocks that can't be decoded (default "throw")
 });
 // { data: Uint8ClampedArray (RGBA), width, height, level, bounds: { minX, minY, maxX, maxY },
@@ -109,6 +110,8 @@ var img = await ecw.readRegion({
 
 await ecw.close(); // also deletes this reader's scratch files
 ```
+
+For files written at a compression target of 10 or more, with at least five levels, the ECW SDK adds a fixed, faint grain (up to ±5) to the brightness of the three finest levels. ecw-js adds the same grain so its pixels match the SDK's; `dither: false` leaves it out.
 
 ### Blocks that can't be decoded
 

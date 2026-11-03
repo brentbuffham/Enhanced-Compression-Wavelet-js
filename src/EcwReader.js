@@ -19,6 +19,7 @@ import { parseWorldFile, parsePrj } from "./format/sidecars.js";
 import { createDecodeContext, decodeWindow, imageLevelSize, countWindowBlocks, locateBlockError, finishBadBlocks } from "./decode/RegionDecoder.js";
 import { sampleWindow } from "./decode/sampleWindow.js";
 import { yuvToRgba, greyToRgba, bandsToRgba } from "./codec/colour.js";
+import { ditherBand, addDither } from "./codec/dither.js";
 import { applyColorKey, colorKeysFromOptions } from "./post/applyColorKey.js";
 import { clipToPolygon } from "./post/clipToPolygon.js";
 import { applyStretch, stretchFromPixels } from "./post/stretch.js";
@@ -101,11 +102,13 @@ function isCount(v) {
  * @param {{x:number, y:number, width:number, height:number, outWidth?:number, outHeight?:number,
  *   resample?:"nearest"|"average", transparentBelow?:number, transparentAbove?:number,
  *   transparentColor?:{color:string|number[], below?:number, above?:number}|Array, clipPolygon?:Array,
- *   stretch?:{min:number[], max:number[]},
+ *   stretch?:{min:number[], max:number[]}, dither?:boolean,
  *   onProgress?:function(number, string), signal?:AbortSignal, maxOutputBytes?:number}} opts
  *   x, y, width, height are full-resolution pixels; outWidth/outHeight default to width/height.
  *   resample "nearest" (default) matches GDAL / the ECW SDK exactly; "average" box-averages
  *   the decoded level for smooth downsampling between levels.
+ *   dither (default true) adds the SDK's fixed ±5 luma dither to the three finest levels of
+ *   files with compression target 10 or more, as GDAL shows them; false gives the clean values.
  *   transparentBelow N clears pixels whose R, G and B are all <= N; transparentAbove N all >= N;
  *   transparentColor clears pixels within below..above of a colour ("#rrggbb" or [r, g, b]), one or a list.
  *   stretch (optional, e.g. from computeStretch) maps each band's min..max to 0..255.
@@ -143,6 +146,7 @@ EcwReader.prototype._plan = function (opts) {
 	if (o.stretch !== undefined) applyStretch(new Uint8ClampedArray(0), o.stretch);
 	var colorKeys = colorKeysFromOptions(o);
 	if (o.onBadBlock !== undefined && o.onBadBlock !== "throw" && o.onBadBlock !== "skip") throw invalid("onBadBlock must be \"throw\" or \"skip\"");
+	if (o.dither !== undefined && typeof o.dither !== "boolean") throw invalid("dither must be true or false");
 	if (o.signal && o.signal.aborted) throw new EcwError(ERROR_CODES.ABORTED, "decode aborted");
 	// Coarsest level still at least as sharp as the output
 	var factor = Math.min(o.width / outW, o.height / outH);
@@ -200,6 +204,9 @@ EcwReader.prototype._decodeRows = async function (plan, oy0, oy1, progress) {
 	// Eighths are all the colour step uses (it floors to integers) and what cached
 	// tiles hold, so flooring here keeps "average" identical with or without a cache
 	win.bands.forEach(function (band) { for (var i = 0; i < band.length; i++) band[i] = Math.floor(band[i] * 8) / 8; });
+	// the SDK's output dither (finest levels of highly compressed files), in eighths
+	var dither = o.dither === false ? -1 : ditherBand(h, plan.level);
+	if (dither >= 0) addDither(win.bands[dither], lx1 - lx0, ly1 - ly0, lx0, ly0);
 	if (this._cache) await this._cache.flush();
 	var sampled = sampleWindow(win.bands, lx1 - lx0, ly1 - ly0, o, scale, lx0, ly0, outW, plan.outH, plan.resample, oy0, oy1);
 	var data = new Uint8ClampedArray(outW * (oy1 - oy0) * 4);
