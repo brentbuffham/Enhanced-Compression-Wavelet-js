@@ -57,6 +57,8 @@ function frame(streams) {
  *   steps?:function(number):{a:number,b:number,c:number},
  *   coeff:function(number, number, string, number, number):number, mode?:number}} o
  *   mode 2 writes Huffman streams (test encoder), default 6 writes run-length words.
+ *   streamOverride(r, b, sb, bx, by) may return the full bytes of a stream (mode byte first)
+ *   to use instead, e.g. a hand-built stream in a mode being worked out.
  *   colorSpace sets header byte 0x03; level records hold one step per band.
  * @returns {Uint8Array} ECW file bytes
  */
@@ -75,6 +77,8 @@ export function craftEcw(o) {
 			var pw = Math.min(block, lv.width - bx * block), ph = Math.min(block, lv.height - by * block), streams = [];
 			for (var b = 0; b < bands; b++) subbands.forEach(function (sb) {
 				var vals = [];
+				var own = o.streamOverride ? o.streamOverride(r, b, sb, bx, by) : null;
+				if (own) { streams.push(own); return; }
 				for (var y = 0; y < ph; y++) for (var x = 0; x < pw; x++) vals.push(o.coeff(r, b, sb, bx * block + x, by * block + y));
 				if (vals.every(function (v) { return v === 0; })) { streams.push(Uint8Array.of(5)); return; }
 				if (o.mode === 2) { var payload = encodeMode2(toSymbols(vals)); var st = new Uint8Array(1 + payload.length); st[0] = 2; st.set(payload, 1); streams.push(st); return; }
